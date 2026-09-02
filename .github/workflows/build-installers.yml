@@ -11,13 +11,13 @@ on:
 permissions:
   contents: write
 
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
 jobs:
   windows:
     name: Windows x64
     runs-on: windows-latest
-    env:
-      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,12 +47,6 @@ jobs:
           - name: Intel
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
-    env:
-      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,13 +58,6 @@ jobs:
         run: npm test
       - name: Build DMG installer
         run: npm run dist:mac
-      - name: Notarize DMG when Apple credentials are configured
-        if: ${{ env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
-        run: |
-          for image in dist/*.dmg; do
-            xcrun notarytool submit "$image" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-            xcrun stapler staple "$image"
-          done
       - uses: actions/upload-artifact@v4
         with:
           name: Meeting-Notes-macOS-${{ matrix.name }}
