@@ -1,0 +1,81 @@
+{
+  "name": "luckroute-meeting-notes",
+  "version": "1.0.0",
+  "description": "Расшифровка MP4-записей созвонов и создание сводок в один клик",
+  "private": true,
+  "main": "app/main.cjs",
+  "author": "Luckroute",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "check": "node scripts/check-project.cjs",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "electron-builder --mac dmg --publish never"
+  },
+  "dependencies": {
+    "ffmpeg-static": "5.2.0"
+  },
+  "devDependencies": {
+    "electron": "37.2.6",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "com.luckroute.meetingnotes",
+    "productName": "Сводка созвона",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "app/**/*",
+      "src/**/*",
+      "package.json",
+      "node_modules/ffmpeg-static/**/*"
+    ],
+    "artifactName": "Meeting-Notes-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "installerLanguages": [
+        "ru_RU"
+      ],
+      "language": "1049",
+      "unicode": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "minimumSystemVersion": "12.0"
+    },
+    "dmg": {
+      "title": "Сводка созвона ${version}",
+      "contents": [
+        {
+          "x": 140,
+          "y": 180
+        },
+        {
+          "x": 420,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

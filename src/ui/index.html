@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Сводка созвона</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="renderer.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="header-copy">
+          <p class="eyebrow">LUCKROUTE</p>
+          <h1>Сводка созвона</h1>
+          <p class="subtitle">Из MP4 — в полную расшифровку и готовую сводку</p>
+        </div>
+        <button id="settingsButton" class="icon-button" type="button" title="Настройки OpenAI" aria-label="Открыть настройки">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"></path>
+            <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.5-2-3.4-2.4 1a8.4 8.4 0 0 0-2.6-1.5L14.1 2h-4l-.4 3.1a8.4 8.4 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0 0 3l-2 1.5 2 3.4 2.4-1a8.4 8.4 0 0 0 2.6 1.5l.4 3.1h4l.4-3.1a8.4 8.4 0 0 0 2.6-1.5l2.4 1 2-3.4-2.1-1.5Z"></path>
+          </svg>
+        </button>
+      </header>
+
+      <section id="keyNotice" class="notice" hidden>
+        <div>
+          <strong>Нужна однократная настройка</strong>
+          <span>Сохраните API-ключ OpenAI — после этого останутся только выбор файла и один запуск.</span>
+        </div>
+        <button id="noticeSettingsButton" class="text-button" type="button">Настроить</button>
+      </section>
+
+      <section class="selection-card" aria-labelledby="sourceHeading">
+        <div class="step-number">1</div>
+        <div class="selection-content">
+          <h2 id="sourceHeading">Видео созвона</h2>
+          <p id="videoPath" class="path-value empty">MP4-файл не выбран</p>
+        </div>
+        <button id="chooseVideoButton" class="secondary-button" type="button">Выбрать MP4</button>
+      </section>
+
+      <section class="selection-card" aria-labelledby="outputHeading">
+        <div class="step-number">2</div>
+        <div class="selection-content">
+          <h2 id="outputHeading">Место сохранения</h2>
+          <p id="outputPath" class="path-value empty">Папка не выбрана</p>
+        </div>
+        <button id="chooseOutputButton" class="secondary-button" type="button">Выбрать папку</button>
+      </section>
+
+      <section id="progressSection" class="progress-card" hidden aria-live="polite">
+        <div class="progress-copy">
+          <span id="progressMessage">Подготовка…</span>
+          <strong id="progressPercent">0%</strong>
+        </div>
+        <progress id="progressBar" max="100" value="0">0%</progress>
+        <p>Можно оставить приложение открытым в фоне. Длинные записи обрабатываются дольше.</p>
+      </section>
+
+      <section id="resultSection" class="result-card" hidden aria-live="polite">
+        <div class="result-icon" aria-hidden="true">✓</div>
+        <div class="result-copy">
+          <strong id="resultTitle">Готово</strong>
+          <span id="resultMessage">Оба файла сохранены.</span>
+        </div>
+        <button id="showResultButton" class="text-button" type="button">Показать файл</button>
+      </section>
+
+      <p id="errorMessage" class="error-message" hidden role="alert"></p>
+
+      <div class="action-row">
+        <button id="startButton" class="primary-button" type="button" disabled>
+          Создать расшифровку и сводку
+        </button>
+        <button id="cancelButton" class="cancel-button" type="button" hidden>Остановить</button>
+      </div>
+
+      <footer>
+        <span>На выходе: «— расшифровка.txt» и «— сводка.txt»</span>
+        <span id="versionLabel"></span>
+      </footer>
+    </main>
+
+    <dialog id="settingsDialog" class="settings-dialog">
+      <form method="dialog" id="settingsForm">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">НАСТРОЙКИ</p>
+            <h2>Ключ OpenAI</h2>
+          </div>
+          <button id="closeSettingsButton" class="icon-button close-button" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <p class="dialog-description">Введите API-ключ один раз. Он будет зашифрован средствами Windows или связкой ключей macOS и не попадёт в файлы результата.</p>
+        <label for="apiKeyInput">API-ключ</label>
+        <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+        <p id="settingsStatus" class="settings-status" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="deleteKeyButton" class="danger-text-button" type="button">Удалить ключ</button>
+          <span class="spacer"></span>
+          <button id="cancelSettingsButton" class="secondary-button" type="button">Отмена</button>
+          <button id="saveKeyButton" class="primary-small-button" type="submit">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
+
