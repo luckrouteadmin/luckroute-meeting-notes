@@ -14,6 +14,8 @@ const requiredFiles = [
   "src/core/workflow.cjs",
   "src/core/openai-api.cjs",
   "src/core/prompt.cjs",
+  "scripts/mac-adhoc-sign.cjs",
+  "build/entitlements.mac.plist",
   "build/icon.png",
   "build/icon.ico",
   ".github/workflows/build-installers.yml"
@@ -44,10 +46,13 @@ if (packageJson.build?.nsis?.oneClick !== false || packageJson.build?.nsis?.allo
   throw new Error("Windows-сборка должна использовать мастер установки с выбором папки.");
 }
 
+if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !== "./scripts/mac-adhoc-sign.cjs") {
+  throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
+}
+
 const prompt = fs.readFileSync(path.join(root, "src/core/prompt.cjs"), "utf8");
 for (const heading of ["КРАТКОЕ РЕЗЮМЕ", "ОБСУЖДЕНИЕ ПО ТЕМАМ", "ПРИНЯТЫЕ РЕШЕНИЯ", "ЗАДАЧИ ПО ОТВЕТСТВЕННЫМ", "ОТКРЫТЫЕ ВОПРОСЫ", "ИТОГИ"]) {
   if (!prompt.includes(heading)) throw new Error(`В шаблоне сводки нет раздела: ${heading}`);
 }
 
 process.stdout.write(`Проверено файлов JavaScript: ${javascriptFiles.length}. Проект собран корректно.\n`);
-

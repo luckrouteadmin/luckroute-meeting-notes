@@ -1,6 +1,6 @@
 {
   "name": "luckroute-meeting-notes",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Расшифровка MP4-записей созвонов и создание сводок в один клик",
   "private": true,
   "main": "app/main.cjs",
@@ -17,8 +17,9 @@
     "ffmpeg-static": "5.2.0"
   },
   "devDependencies": {
-    "electron": "37.2.6",
-    "electron-builder": "26.0.12"
+    "@electron/osx-sign": "1.3.3",
+    "electron": "44.1.1",
+    "electron-builder": "26.16.0"
   },
   "build": {
     "appId": "com.luckroute.meetingnotes",
@@ -58,7 +59,12 @@
       "target": "dmg",
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
-      "identity": null,
+      "identity": "-",
+      "sign": "./scripts/mac-adhoc-sign.cjs",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "preAutoEntitlements": false,
+      "timestamp": "none",
       "notarize": false,
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
