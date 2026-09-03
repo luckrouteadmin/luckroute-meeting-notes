@@ -21,3 +21,14 @@ test("таймкоды второй части продолжаются от н�
   assert.match(transcript, /\[00:20:02–00:20:05\] Спикер B: Добрый день/);
 });
 
+test("подтверждённое имя выводится вместо служебной метки спикера", () => {
+  const transcript = formatFullTranscript([
+    {
+      offsetSeconds: 0,
+      segments: [{ start: 2, end: 5, speaker: "A", speakerName: "Анастасия", text: "Добрый день" }]
+    }
+  ], { sourceName: "call.mp4", createdAt: new Date("2026-09-02T10:00:00Z") });
+  assert.match(transcript, /Имена, определённые по видео: Анастасия/);
+  assert.match(transcript, /Анастасия: Добрый день/);
+  assert.doesNotMatch(transcript, /Спикер A: Добрый день/);
+});

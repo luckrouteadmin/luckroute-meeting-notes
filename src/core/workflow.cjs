@@ -4,7 +4,17 @@ const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs/promises");
 const { splitAudio, AUDIO_CHUNK_SECONDS } = require("./audio.cjs");
-const { transcribeAudioFile, summarizeTranscript } = require("./openai-api.cjs");
+const {
+  identifySpeakersFromFrames,
+  transcribeAudioFile,
+  summarizeTranscript
+} = require("./openai-api.cjs");
+const { extractSpeakerFrames } = require("./video.cjs");
+const {
+  aggregateSpeakerNames,
+  applySpeakerNames,
+  selectSpeakerSamples
+} = require("./speaker-identity.cjs");
 const { formatFullTranscript } = require("./transcript.cjs");
 const {
   atomicWriteText,
@@ -29,6 +39,7 @@ async function runMeetingWorkflow({
   videoPath,
   outputDirectory,
   apiKey,
+  identifySpeakers = true,
   signal,
   onProgress = () => {},
   dependencies = {}
@@ -43,6 +54,8 @@ async function runMeetingWorkflow({
   const splitAudioImpl = dependencies.splitAudio || splitAudio;
   const transcribeImpl = dependencies.transcribeAudioFile || transcribeAudioFile;
   const summarizeImpl = dependencies.summarizeTranscript || summarizeTranscript;
+  const extractFramesImpl = dependencies.extractSpeakerFrames || extractSpeakerFrames;
+  const identifyFramesImpl = dependencies.identifySpeakersFromFrames || identifySpeakersFromFrames;
 
   try {
     onProgress({ stage: "audio", percent: 4, message: "Извлекаю звук из видео…" });
@@ -72,10 +85,54 @@ async function runMeetingWorkflow({
       });
     }
 
+    let resolvedParts = parts;
+    let identifiedSpeakerCount = 0;
+    if (identifySpeakers) {
+      const samples = selectSpeakerSamples(parts);
+      if (samples.length > 0) {
+        onProgress({
+          stage: "speaker-identification",
+          percent: 58,
+          message: "Определяю имена участников по видео…"
+        });
+        try {
+          const frames = await extractFramesImpl({
+            inputPath: videoPath,
+            samples,
+            outputDirectory: temporaryDirectory,
+            signal
+          });
+          if (frames.length > 0) {
+            const observations = await identifyFramesImpl({
+              samples: frames,
+              apiKey,
+              signal
+            });
+            const mappings = aggregateSpeakerNames(frames, observations);
+            identifiedSpeakerCount = Object.keys(mappings).length;
+            resolvedParts = applySpeakerNames(parts, mappings);
+          }
+        } catch (error) {
+          if (signal?.aborted || error instanceof CancelledError) throw new CancelledError();
+          onProgress({
+            stage: "speaker-identification-skipped",
+            percent: 61,
+            message: "Имена определить не удалось — продолжаю с нейтральными метками спикеров."
+          });
+        }
+      }
+    }
+
     const createdAt = new Date();
-    const transcript = formatFullTranscript(parts, { sourceName, createdAt });
+    const transcript = formatFullTranscript(resolvedParts, { sourceName, createdAt });
     await atomicWriteText(outputPaths.transcriptPath, transcript);
-    onProgress({ stage: "saved-transcript", percent: 62, message: "Полная расшифровка сохранена." });
+    onProgress({
+      stage: "saved-transcript",
+      percent: 66,
+      message: identifiedSpeakerCount > 0
+        ? `Полная расшифровка сохранена. Определено имён: ${identifiedSpeakerCount}.`
+        : "Полная расшифровка сохранена."
+    });
 
     let summary;
     try {
@@ -95,11 +152,10 @@ async function runMeetingWorkflow({
       formatSummaryFile(summary, { sourceName, createdAt })
     );
     onProgress({ stage: "complete", percent: 100, message: "Готово: оба TXT-файла сохранены." });
-    return outputPaths;
+    return { ...outputPaths, identifiedSpeakerCount };
   } finally {
     await fs.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
   }
 }
 
 module.exports = { runMeetingWorkflow, validateInputs };
-

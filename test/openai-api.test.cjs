@@ -8,6 +8,7 @@ const path = require("node:path");
 const {
   createTextResponse,
   extractResponseText,
+  identifySpeakersFromFrames,
   splitLongText,
   transcribeAudioFile
 } = require("../src/core/openai-api.cjs");
@@ -74,4 +75,49 @@ test("запрос сводки отключает хранение ответа
     }
   });
   assert.equal(result, "Сводка");
+});
+
+test("анализ имён отправляет отдельные кадры и требует структурированный результат", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-vision-test-"));
+  const framePath = path.join(directory, "frame.jpg");
+  await fs.writeFile(framePath, "jpeg bytes");
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  const observations = await identifySpeakersFromFrames({
+    samples: [{
+      sampleId: "frame-001",
+      speakerKey: "0:A",
+      timestampSeconds: 12.5,
+      framePath
+    }],
+    apiKey: "secret-key-for-test-only",
+    fetchImpl: async (url, options) => {
+      assert.match(url, /\/responses$/);
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, "gpt-5.4-mini");
+      assert.equal(body.store, false);
+      assert.equal(body.text.format.type, "json_schema");
+      const image = body.input[0].content.find((item) => item.type === "input_image");
+      assert.equal(image.detail, "original");
+      assert.match(image.image_url, /^data:image\/jpeg;base64,/);
+      return new Response(JSON.stringify({
+        output: [{
+          type: "message",
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              observations: [{
+                sample_id: "frame-001",
+                active_speaker_name: "Максим",
+                active_indicator_visible: true,
+                name_label_visible: true,
+                confidence: "high"
+              }]
+            })
+          }]
+        }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+  });
+  assert.equal(observations[0].active_speaker_name, "Максим");
 });

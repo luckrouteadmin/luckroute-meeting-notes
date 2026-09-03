@@ -21,9 +21,9 @@ let activeJob = null;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 780,
-    height: 690,
+    height: 770,
     minWidth: 680,
-    minHeight: 620,
+    minHeight: 700,
     show: false,
     title: "Сводка созвона",
     backgroundColor: "#f5f3ee",
@@ -163,6 +163,7 @@ function registerIpcHandlers() {
       const result = await runMeetingWorkflow({
         videoPath: options?.videoPath,
         outputDirectory: options?.outputDirectory,
+        identifySpeakers: options?.identifySpeakers !== false,
         apiKey,
         signal: controller.signal,
         onProgress: (progress) => sendProgress(event, progress)
@@ -206,4 +207,3 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-

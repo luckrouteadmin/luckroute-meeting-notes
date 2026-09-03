@@ -12,8 +12,47 @@ const {
 const API_BASE_URL = "https://api.openai.com/v1";
 const TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
 const SUMMARY_MODEL = "gpt-5-mini";
+const SPEAKER_VISION_MODEL = "gpt-5.4-mini";
 const MAX_DIRECT_SUMMARY_CHARACTERS = 700_000;
 const NOTES_CHUNK_CHARACTERS = 240_000;
+
+const SPEAKER_VISION_INSTRUCTIONS = `Ты анализируешь кадры записи видеосозвона и читаешь только видимые элементы интерфейса Teams, Zoom, Google Meet или похожей программы.
+
+Для каждого кадра:
+1. Определи, есть ли однозначный визуальный индикатор активного говорящего: цветная или яркая рамка, значок речи, подпись активного спикера либо явно выделенная программой плитка.
+2. Прочитай имя именно у выделенного участника.
+3. Не распознавай человека по лицу, не связывай имя с внешностью, голосом, содержанием речи, порядком плиток или предыдущими кадрами.
+4. Если индикатор не виден, имя обрезано, подпись не читается или есть несколько возможных говорящих, верни пустое имя и confidence=low.
+5. Сохраняй написание видимого имени без исправлений и дополнений.`;
+
+const SPEAKER_OBSERVATIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    observations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          sample_id: { type: "string" },
+          active_speaker_name: { type: "string" },
+          active_indicator_visible: { type: "boolean" },
+          name_label_visible: { type: "boolean" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] }
+        },
+        required: [
+          "sample_id",
+          "active_speaker_name",
+          "active_indicator_visible",
+          "name_label_visible",
+          "confidence"
+        ],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["observations"],
+  additionalProperties: false
+};
 
 function sleep(milliseconds, signal) {
   return new Promise((resolve, reject) => {
@@ -150,6 +189,71 @@ async function createTextResponse({ apiKey, instructions, input, maxOutputTokens
   return extractResponseText(payload);
 }
 
+function parseSpeakerObservations(payload) {
+  let parsed;
+  try {
+    parsed = JSON.parse(extractResponseText(payload));
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("Не удалось прочитать результат анализа кадров.", {
+      code: "INVALID_VISION_RESPONSE"
+    });
+  }
+  if (!Array.isArray(parsed?.observations)) {
+    throw new ApiError("Модель не вернула наблюдения по кадрам.", {
+      code: "INVALID_VISION_RESPONSE"
+    });
+  }
+  return parsed.observations;
+}
+
+async function identifySpeakersFromFrames({ samples, apiKey, signal, fetchImpl = fetch }) {
+  if (!Array.isArray(samples) || samples.length === 0) return [];
+  const images = await Promise.all(samples.map(async (sample) => ({
+    ...sample,
+    base64: (await fs.readFile(sample.framePath)).toString("base64")
+  })));
+  const content = [{
+    type: "input_text",
+    text: "Далее идут пары из служебной метки и соответствующего кадра. Верни ровно одно наблюдение для каждого sample_id. Метка audio_speaker нужна только для сопоставления результата и не является подсказкой об имени."
+  }];
+  for (const image of images) {
+    content.push({
+      type: "input_text",
+      text: `sample_id=${image.sampleId}; audio_speaker=${image.speakerKey}; time_seconds=${image.timestampSeconds.toFixed(3)}`
+    });
+    content.push({
+      type: "input_image",
+      image_url: `data:image/jpeg;base64,${image.base64}`,
+      detail: "original"
+    });
+  }
+
+  const payload = await requestWithRetry({
+    url: `${API_BASE_URL}/responses`,
+    apiKey,
+    signal,
+    fetchImpl,
+    headers: { "Content-Type": "application/json" },
+    bodyFactory: () => JSON.stringify({
+      model: SPEAKER_VISION_MODEL,
+      instructions: SPEAKER_VISION_INSTRUCTIONS,
+      input: [{ role: "user", content }],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "speaker_frame_observations",
+          strict: true,
+          schema: SPEAKER_OBSERVATIONS_SCHEMA
+        }
+      },
+      max_output_tokens: 4_000,
+      store: false
+    })
+  });
+  return parseSpeakerObservations(payload);
+}
+
 function splitLongText(text, maximumCharacters = NOTES_CHUNK_CHARACTERS) {
   const lines = String(text).split("\n");
   const chunks = [];
@@ -223,10 +327,14 @@ module.exports = {
   API_BASE_URL,
   MAX_DIRECT_SUMMARY_CHARACTERS,
   NOTES_CHUNK_CHARACTERS,
+  SPEAKER_OBSERVATIONS_SCHEMA,
+  SPEAKER_VISION_MODEL,
   SUMMARY_MODEL,
   TRANSCRIPTION_MODEL,
   createTextResponse,
   extractResponseText,
+  identifySpeakersFromFrames,
+  parseSpeakerObservations,
   splitLongText,
   summarizeTranscript,
   transcribeAudioFile

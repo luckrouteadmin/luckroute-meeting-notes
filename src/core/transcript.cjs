@@ -29,7 +29,8 @@ function formatPart(part) {
       .map((segment) => {
         const start = formatTimestamp(offset + (Number(segment.start) || 0));
         const end = formatTimestamp(offset + (Number(segment.end) || Number(segment.start) || 0));
-        return `[${start}–${end}] ${speakerName(segment.speaker)}: ${normalizeText(segment.text)}`;
+        const label = normalizeText(segment.speakerName) || speakerName(segment.speaker);
+        return `[${start}–${end}] ${label}: ${normalizeText(segment.text)}`;
       })
       .join("\n");
   }
@@ -39,11 +40,21 @@ function formatPart(part) {
 }
 
 function formatFullTranscript(parts, { sourceName, createdAt = new Date() }) {
+  const identifiedNames = [...new Set(parts.flatMap((part) => (
+    Array.isArray(part.segments)
+      ? part.segments.map((segment) => normalizeText(segment.speakerName)).filter(Boolean)
+      : []
+  )))];
   const header = [
     "ПОЛНАЯ РАСШИФРОВКА СОЗВОНА",
     `Исходный файл: ${sourceName}`,
     `Создано: ${createdAt.toLocaleString("ru-RU")}`,
-    "Примечание: при длинной записи обозначения спикеров могут начинаться заново в каждой части."
+    ...(identifiedNames.length > 0
+      ? [
+        `Имена, определённые по видео: ${identifiedNames.join(", ")}`,
+        "Примечание: имена добавлены только при повторном уверенном совпадении подписи и индикатора говорящего."
+      ]
+      : ["Примечание: при длинной записи обозначения спикеров могут начинаться заново в каждой части."])
   ].join("\n");
 
   const body = parts
@@ -65,4 +76,3 @@ module.exports = {
   normalizeText,
   speakerName
 };
-

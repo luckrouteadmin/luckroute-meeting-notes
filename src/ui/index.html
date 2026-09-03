@@ -53,6 +53,14 @@
         <button id="chooseOutputButton" class="secondary-button" type="button">Выбрать папку</button>
       </section>
 
+      <label class="video-analysis-option" for="identifySpeakersCheckbox">
+        <input id="identifySpeakersCheckbox" type="checkbox" checked>
+        <span>
+          <strong>Определять имена участников по видео</strong>
+          <small>В OpenAI отправятся отдельные временные кадры с подписями и индикатором говорящего. После обработки они будут удалены.</small>
+        </span>
+      </label>
+
       <section id="progressSection" class="progress-card" hidden aria-live="polite">
         <div class="progress-copy">
           <span id="progressMessage">Подготовка…</span>
@@ -81,7 +89,7 @@
       </div>
 
       <footer>
-        <span>На выходе: «— расшифровка.txt» и «— сводка.txt»</span>
+        <span>На выходе: полная расшифровка и сводка в TXT</span>
         <span id="versionLabel"></span>
       </footer>
     </main>
@@ -109,4 +117,3 @@
     </dialog>
   </body>
 </html>
-

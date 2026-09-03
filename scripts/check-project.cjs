@@ -13,6 +13,8 @@ const requiredFiles = [
   "src/ui/renderer.js",
   "src/core/workflow.cjs",
   "src/core/openai-api.cjs",
+  "src/core/speaker-identity.cjs",
+  "src/core/video.cjs",
   "src/core/prompt.cjs",
   "scripts/mac-adhoc-sign.cjs",
   "build/entitlements.mac.plist",
@@ -48,6 +50,15 @@ if (packageJson.build?.nsis?.oneClick !== false || packageJson.build?.nsis?.allo
 
 if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !== "./scripts/mac-adhoc-sign.cjs") {
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
+}
+
+if (packageJson.version !== "1.1.0") {
+  throw new Error("Версия сборки должна быть 1.1.0.");
+}
+
+const interfaceHtml = fs.readFileSync(path.join(root, "src/ui/index.html"), "utf8");
+if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("отдельные временные кадры")) {
+  throw new Error("Интерфейс должен явно сообщать об анализе отдельных кадров.");
 }
 
 const prompt = fs.readFileSync(path.join(root, "src/core/prompt.cjs"), "utf8");

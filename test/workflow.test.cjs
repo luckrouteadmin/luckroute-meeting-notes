@@ -31,6 +31,7 @@ test("рабочий процесс сохраняет расшифровку и
   const result = await runMeetingWorkflow({
     ...paths,
     apiKey: "not-used",
+    identifySpeakers: false,
     onProgress: (event) => progress.push(event),
     dependencies: {
       splitAudio: fakeSplitAudio(),
@@ -46,6 +47,61 @@ test("рабочий процесс сохраняет расшифровку и
   assert.match(transcript, /Спикер A: Обсудили продажи/);
   assert.match(summary, /КРАТКОЕ РЕЗЮМЕ/);
   assert.equal(progress.at(-1).percent, 100);
+});
+
+test("рабочий процесс подставляет подтверждённое по кадрам имя", async (t) => {
+  const paths = await fixture(t);
+  const result = await runMeetingWorkflow({
+    ...paths,
+    apiKey: "not-used",
+    dependencies: {
+      splitAudio: fakeSplitAudio(),
+      transcribeAudioFile: async () => ({
+        text: "Первое сообщение. Второе сообщение.",
+        segments: [
+          { start: 0, end: 5, speaker: "A", text: "Первое сообщение" },
+          { start: 12, end: 18, speaker: "A", text: "Второе сообщение" }
+        ]
+      }),
+      extractSpeakerFrames: async ({ samples }) => samples.map((sample) => ({
+        ...sample,
+        framePath: `/temporary/${sample.sampleId}.jpg`
+      })),
+      identifySpeakersFromFrames: async ({ samples }) => samples.map((sample) => ({
+        sample_id: sample.sampleId,
+        active_speaker_name: "Максим",
+        active_indicator_visible: true,
+        name_label_visible: true,
+        confidence: "high"
+      })),
+      summarizeTranscript: async ({ transcript }) => {
+        assert.match(transcript, /Максим: Первое сообщение/);
+        return "КРАТКОЕ РЕЗЮМЕ\nОбсудили вопрос.";
+      }
+    }
+  });
+  assert.equal(result.identifiedSpeakerCount, 1);
+  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /Имена, определённые по видео: Максим/);
+});
+
+test("сбой необязательного анализа кадров не мешает создать оба TXT", async (t) => {
+  const paths = await fixture(t);
+  const result = await runMeetingWorkflow({
+    ...paths,
+    apiKey: "not-used",
+    dependencies: {
+      splitAudio: fakeSplitAudio(),
+      transcribeAudioFile: async () => ({
+        text: "Текст",
+        segments: [{ start: 0, end: 5, speaker: "A", text: "Текст" }]
+      }),
+      extractSpeakerFrames: async () => { throw new Error("vision unavailable"); },
+      summarizeTranscript: async () => "КРАТКОЕ РЕЗЮМЕ\nТекст."
+    }
+  });
+  assert.equal(result.identifiedSpeakerCount, 0);
+  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /Спикер A: Текст/);
+  assert.match(await fs.readFile(result.summaryPath, "utf8"), /КРАТКОЕ РЕЗЮМЕ/);
 });
 
 test("при сбое сводки уже готовая расшифровка остаётся на диске", async (t) => {

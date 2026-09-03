@@ -7,6 +7,7 @@ const elements = {
   noticeSettingsButton: document.querySelector("#noticeSettingsButton"),
   chooseVideoButton: document.querySelector("#chooseVideoButton"),
   chooseOutputButton: document.querySelector("#chooseOutputButton"),
+  identifySpeakersCheckbox: document.querySelector("#identifySpeakersCheckbox"),
   videoPath: document.querySelector("#videoPath"),
   outputPath: document.querySelector("#outputPath"),
   startButton: document.querySelector("#startButton"),
@@ -53,6 +54,7 @@ function updateControls() {
   elements.startButton.disabled = state.running || !state.videoPath || !state.outputDirectory;
   elements.chooseVideoButton.disabled = state.running;
   elements.chooseOutputButton.disabled = state.running;
+  elements.identifySpeakersCheckbox.disabled = state.running;
   elements.settingsButton.disabled = state.running;
   elements.cancelButton.hidden = !state.running;
   elements.keyNotice.hidden = state.hasApiKey;
@@ -151,7 +153,8 @@ elements.startButton.addEventListener("click", async () => {
 
   const result = await api.start({
     videoPath: state.videoPath,
-    outputDirectory: state.outputDirectory
+    outputDirectory: state.outputDirectory,
+    identifySpeakers: elements.identifySpeakersCheckbox.checked
   });
 
   state.running = false;
@@ -176,7 +179,9 @@ elements.startButton.addEventListener("click", async () => {
 
   state.revealPath = result.summaryPath;
   elements.resultTitle.textContent = "Готово — сохранены два TXT-файла";
-  elements.resultMessage.textContent = basename(result.summaryPath);
+  elements.resultMessage.textContent = result.identifiedSpeakerCount > 0
+    ? `${basename(result.summaryPath)} · имён определено: ${result.identifiedSpeakerCount}`
+    : basename(result.summaryPath);
   elements.showResultButton.textContent = "Показать файлы";
   elements.resultSection.hidden = false;
 });
@@ -207,4 +212,3 @@ async function initialize() {
 }
 
 initialize().catch(() => showError("Не удалось запустить приложение. Перезапустите его."));
-
