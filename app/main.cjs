@@ -7,6 +7,7 @@ const {
   BrowserWindow,
   dialog,
   ipcMain,
+  net,
   safeStorage,
   shell
 } = require("electron");
@@ -166,6 +167,7 @@ function registerIpcHandlers() {
         identifySpeakers: options?.identifySpeakers !== false,
         apiKey,
         signal: controller.signal,
+        fetchImpl: (input, init) => net.fetch(input, init),
         onProgress: (progress) => sendProgress(event, progress)
       });
       return { ok: true, ...result };

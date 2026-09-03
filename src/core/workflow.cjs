@@ -41,6 +41,7 @@ async function runMeetingWorkflow({
   apiKey,
   identifySpeakers = true,
   signal,
+  fetchImpl,
   onProgress = () => {},
   dependencies = {}
 }) {
@@ -76,7 +77,8 @@ async function runMeetingWorkflow({
       const result = await transcribeImpl({
         filePath: chunks[index],
         apiKey,
-        signal
+        signal,
+        fetchImpl
       });
       parts.push({
         text: result.text || "",
@@ -106,7 +108,8 @@ async function runMeetingWorkflow({
             const observations = await identifyFramesImpl({
               samples: frames,
               apiKey,
-              signal
+              signal,
+              fetchImpl
             });
             const mappings = aggregateSpeakerNames(frames, observations);
             identifiedSpeakerCount = Object.keys(mappings).length;
@@ -140,6 +143,7 @@ async function runMeetingWorkflow({
         transcript,
         apiKey,
         signal,
+        fetchImpl,
         onProgress
       });
     } catch (error) {

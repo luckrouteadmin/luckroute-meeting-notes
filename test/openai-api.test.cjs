@@ -9,9 +9,31 @@ const {
   createTextResponse,
   extractResponseText,
   identifySpeakersFromFrames,
+  normalizeRequestError,
   splitLongText,
   transcribeAudioFile
 } = require("../src/core/openai-api.cjs");
+const { ApiError, toUserError } = require("../src/core/errors.cjs");
+
+test("сетевая ошибка преобразуется в понятное сообщение для пользователя", () => {
+  const original = new TypeError("fetch failed");
+  const normalized = normalizeRequestError(original);
+  assert.ok(normalized instanceof ApiError);
+  assert.equal(normalized.code, "NETWORK_ERROR");
+  assert.equal(normalized.cause, original);
+  const userError = toUserError(normalized);
+  assert.equal(userError.code, "NETWORK_ERROR");
+  assert.match(userError.message, /VPN или прокси/);
+  assert.doesNotMatch(userError.message, /fetch failed/);
+});
+
+test("тайм-аут сети отличается от отмены пользователем", () => {
+  const normalized = normalizeRequestError(new DOMException("aborted", "AbortError"), {
+    timedOut: true
+  });
+  assert.equal(normalized.code, "NETWORK_TIMEOUT");
+  assert.match(toUserError(normalized).message, /слишком долго/);
+});
 
 test("текст извлекается из обычного JSON Responses API", () => {
   const payload = {

@@ -9,11 +9,12 @@ class CancelledError extends Error {
 }
 
 class ApiError extends Error {
-  constructor(message, { status = 0, code = "API_ERROR" } = {}) {
+  constructor(message, { status = 0, code = "API_ERROR", cause } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    if (cause) this.cause = cause;
   }
 }
 
@@ -26,6 +27,18 @@ function toUserError(error) {
     return { code: "CANCELLED", message: "Обработка отменена." };
   }
   if (error instanceof ApiError) {
+    if (error.code === "NETWORK_ERROR") {
+      return {
+        code: "NETWORK_ERROR",
+        message: "Не удалось подключиться к OpenAI. Проверьте интернет и работу VPN или прокси, затем повторите."
+      };
+    }
+    if (error.code === "NETWORK_TIMEOUT") {
+      return {
+        code: "NETWORK_TIMEOUT",
+        message: "OpenAI слишком долго не отвечает. Проверьте интернет или VPN и повторите попытку."
+      };
+    }
     if (error.status === 401) {
       return { code: "INVALID_API_KEY", message: "OpenAI отклонил ключ. Откройте настройки и сохраните действующий API-ключ." };
     }
@@ -50,4 +63,3 @@ function toUserError(error) {
 }
 
 module.exports = { ApiError, CancelledError, isCancelled, toUserError };
-

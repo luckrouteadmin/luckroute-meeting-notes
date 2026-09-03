@@ -51,30 +51,39 @@ test("рабочий процесс сохраняет расшифровку и
 
 test("рабочий процесс подставляет подтверждённое по кадрам имя", async (t) => {
   const paths = await fixture(t);
+  const systemFetch = async () => new Response(null, { status: 204 });
   const result = await runMeetingWorkflow({
     ...paths,
     apiKey: "not-used",
+    fetchImpl: systemFetch,
     dependencies: {
       splitAudio: fakeSplitAudio(),
-      transcribeAudioFile: async () => ({
-        text: "Первое сообщение. Второе сообщение.",
-        segments: [
-          { start: 0, end: 5, speaker: "A", text: "Первое сообщение" },
-          { start: 12, end: 18, speaker: "A", text: "Второе сообщение" }
-        ]
-      }),
+      transcribeAudioFile: async ({ fetchImpl }) => {
+        assert.equal(fetchImpl, systemFetch);
+        return {
+          text: "Первое сообщение. Второе сообщение.",
+          segments: [
+            { start: 0, end: 5, speaker: "A", text: "Первое сообщение" },
+            { start: 12, end: 18, speaker: "A", text: "Второе сообщение" }
+          ]
+        };
+      },
       extractSpeakerFrames: async ({ samples }) => samples.map((sample) => ({
         ...sample,
         framePath: `/temporary/${sample.sampleId}.jpg`
       })),
-      identifySpeakersFromFrames: async ({ samples }) => samples.map((sample) => ({
-        sample_id: sample.sampleId,
-        active_speaker_name: "Максим",
-        active_indicator_visible: true,
-        name_label_visible: true,
-        confidence: "high"
-      })),
-      summarizeTranscript: async ({ transcript }) => {
+      identifySpeakersFromFrames: async ({ samples, fetchImpl }) => {
+        assert.equal(fetchImpl, systemFetch);
+        return samples.map((sample) => ({
+          sample_id: sample.sampleId,
+          active_speaker_name: "Максим",
+          active_indicator_visible: true,
+          name_label_visible: true,
+          confidence: "high"
+        }));
+      },
+      summarizeTranscript: async ({ transcript, fetchImpl }) => {
+        assert.equal(fetchImpl, systemFetch);
         assert.match(transcript, /Максим: Первое сообщение/);
         return "КРАТКОЕ РЕЗЮМЕ\nОбсудили вопрос.";
       }

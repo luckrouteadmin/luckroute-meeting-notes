@@ -68,16 +68,35 @@ function sleep(milliseconds, signal) {
 
 function timeoutSignal(parentSignal, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const onAbort = () => controller.abort(parentSignal.reason);
   parentSignal?.addEventListener("abort", onAbort, { once: true });
   return {
     signal: controller.signal,
+    didTimeOut: () => timedOut,
     cleanup: () => {
       clearTimeout(timer);
       parentSignal?.removeEventListener("abort", onAbort);
     }
   };
+}
+
+function normalizeRequestError(error, { timedOut = false } = {}) {
+  if (error instanceof ApiError || error instanceof CancelledError) return error;
+  if (timedOut) {
+    return new ApiError("Превышено время ожидания ответа от OpenAI.", {
+      code: "NETWORK_TIMEOUT",
+      cause: error
+    });
+  }
+  return new ApiError("Не удалось установить сетевое соединение с OpenAI.", {
+    code: "NETWORK_ERROR",
+    cause: error
+  });
 }
 
 async function parseApiResponse(response) {
@@ -120,8 +139,8 @@ async function requestWithRetry({ url, apiKey, bodyFactory, headers = {}, signal
       return await parseApiResponse(response);
     } catch (error) {
       if (signal?.aborted) throw new CancelledError();
-      lastError = error;
-      if (error instanceof ApiError || attempt === 3) throw error;
+      lastError = normalizeRequestError(error, { timedOut: timed.didTimeOut() });
+      if (error instanceof ApiError || attempt === 3) throw lastError;
       await sleep(1200 * 2 ** attempt, signal);
     } finally {
       timed.cleanup();
@@ -334,6 +353,7 @@ module.exports = {
   createTextResponse,
   extractResponseText,
   identifySpeakersFromFrames,
+  normalizeRequestError,
   parseSpeakerObservations,
   splitLongText,
   summarizeTranscript,

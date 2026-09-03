@@ -1,6 +1,6 @@
 {
   "name": "luckroute-meeting-notes",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Расшифровка MP4-записей созвонов и создание сводок в один клик",
   "private": true,
   "main": "app/main.cjs",

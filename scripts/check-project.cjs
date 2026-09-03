@@ -52,8 +52,13 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.1.0") {
-  throw new Error("Версия сборки должна быть 1.1.0.");
+if (packageJson.version !== "1.1.1") {
+  throw new Error("Версия сборки должна быть 1.1.1.");
+}
+
+const mainProcess = fs.readFileSync(path.join(root, "app/main.cjs"), "utf8");
+if (!mainProcess.includes("net.fetch") || !mainProcess.includes("fetchImpl")) {
+  throw new Error("Запросы OpenAI должны использовать системный сетевой стек Electron.");
 }
 
 const interfaceHtml = fs.readFileSync(path.join(root, "src/ui/index.html"), "utf8");
