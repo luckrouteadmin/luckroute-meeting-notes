@@ -16,8 +16,8 @@ const utterances = [
 
 test("вход для поиска границ сохраняет ID, файл, время и говорящего", () => {
   const input = buildBoundaryInput(utterances);
-  assert.match(input, /\\[ID 1\\]\\[Файл 1\\]\\[00:00:00\\] Анна/);
-  assert.match(input, /\\[ID 3\\]\\[Файл 2\\]/);
+  assert.match(input, /\[ID 1\]\[Файл 1\]\[00:00:00\] Анна/);
+  assert.match(input, /\[ID 3\]\[Файл 2\]/);
 });
 
 test("валидные непрерывные диапазоны разделяют реплики", () => {
