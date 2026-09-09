@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - "main"
-    tags:
-      - "v*"
 
 permissions:
   contents: write
@@ -23,12 +21,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies with retry
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            npm install --no-audit --no-fund
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Install attempt $attempt failed; retrying..."
+            Start-Sleep -Seconds (10 * $attempt)
+          }
+          exit 1
       - name: Test
         run: npm run check && npm test
-      - name: Build EXE installer
-        run: npm run dist:win
+      - name: Build EXE installer with retry
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            npm run dist:win
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Build attempt $attempt failed; retrying..."
+            Start-Sleep -Seconds (10 * $attempt)
+          }
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: Meeting-Notes-Windows-x64
@@ -52,12 +66,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies with retry
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm install --no-audit --no-fund; then exit 0; fi
+            echo "Install attempt $attempt failed; retrying..."
+            sleep $((10 * attempt))
+          done
+          exit 1
       - name: Test
         run: npm run check && npm test
-      - name: Build DMG installer
-        run: npm run dist:mac
+      - name: Build DMG installer with retry
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run dist:mac; then exit 0; fi
+            echo "Build attempt $attempt failed; retrying..."
+            sleep $((10 * attempt))
+          done
+          exit 1
       - name: Verify ad-hoc signature
         shell: bash
         run: |
@@ -72,21 +100,6 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
           retention-days: 30
-
-  release:
-    name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, mac]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: release-files
-          merge-multiple: true
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-files/* --generate-notes --title "Сводка созвона $GITHUB_REF_NAME"
 
   package-release:
     name: Package release files
@@ -103,7 +116,15 @@ jobs:
         run: |
           mkdir -p bundle release
           cp installers/*.exe installers/*.dmg bundle/
-          printf '%s\n'             'Сводка созвона 1.2.0'             ''             'Windows: запустите EXE и следуйте обычному мастеру установки.'             'macOS Apple Silicon: используйте DMG arm64.'             'macOS Intel: используйте DMG x64.'             ''             'В этой версии: несколько MP4 за один запуск, автоматическое разделение разных созвонов, улучшенное определение имён, подробные сводки и восстановление после сетевого сбоя.'             > bundle/README.txt
+          printf '%s\n' \
+            'Сводка созвона 1.2.0' \
+            '' \
+            'Windows: запустите EXE и следуйте обычному мастеру установки.' \
+            'macOS Apple Silicon: используйте DMG arm64.' \
+            'macOS Intel: используйте DMG x64.' \
+            '' \
+            'В этой версии: несколько MP4 за один запуск, автоматическое разделение разных созвонов, улучшенное определение имён, подробные сводки и восстановление после сетевого сбоя.' \
+            > bundle/README.txt
           (cd bundle && zip -r ../release/Meeting-Notes-1.2.0-Windows-and-macOS.zip .)
           git archive --format=zip --output=release/Meeting-Notes-1.2.0-source.zip HEAD
       - uses: actions/upload-artifact@v4
@@ -118,3 +139,29 @@ jobs:
           path: release/Meeting-Notes-1.2.0-source.zip
           if-no-files-found: error
           retention-days: 30
+
+  publish-release:
+    name: Publish v1.2.0 release
+    needs: [windows, mac, package-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+      - name: Publish permanent GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-files/* --clobber
+          else
+            gh release create "$tag" release-files/* \
+              --target "$GITHUB_SHA" \
+              --title "Сводка созвона $tag" \
+              --notes 'Несколько MP4 за один запуск, автоматическое разделение разных созвонов, улучшенное определение имён, подробные сводки и восстановление после сетевого сбоя.'
+          fi
