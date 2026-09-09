@@ -21,7 +21,7 @@ function normalizeText(value) {
 }
 
 function formatPart(part) {
-  const offset = Number(part.offsetSeconds) || 0;
+  const offset = Number(part.sourceOffsetSeconds ?? part.offsetSeconds) || 0;
   const segments = Array.isArray(part.segments) ? part.segments : [];
   if (segments.length > 0) {
     return segments
@@ -39,40 +39,114 @@ function formatPart(part) {
   return text ? `[${formatTimestamp(offset)}] ${text}` : "";
 }
 
-function formatFullTranscript(parts, { sourceName, createdAt = new Date() }) {
-  const identifiedNames = [...new Set(parts.flatMap((part) => (
-    Array.isArray(part.segments)
-      ? part.segments.map((segment) => normalizeText(segment.speakerName)).filter(Boolean)
-      : []
-  )))];
+function flattenTranscriptParts(parts) {
+  const utterances = [];
+  for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+    const part = parts[partIndex] || {};
+    const sourceOffsetSeconds = Number(part.sourceOffsetSeconds ?? part.offsetSeconds) || 0;
+    const sourceIndex = Math.max(0, Math.trunc(Number(part.sourceIndex) || 0));
+    const segments = Array.isArray(part.segments) ? part.segments : [];
+
+    if (segments.length > 0) {
+      for (const segment of segments) {
+        const text = normalizeText(segment?.text);
+        if (!text) continue;
+        const relativeStart = Math.max(0, Number(segment?.start) || 0);
+        const relativeEnd = Math.max(relativeStart, Number(segment?.end) || relativeStart);
+        const identifiedName = normalizeText(segment?.speakerName);
+        utterances.push({
+          id: utterances.length + 1,
+          partIndex,
+          sourceIndex,
+          sourceName: part.sourceName || "",
+          startSeconds: sourceOffsetSeconds + relativeStart,
+          endSeconds: sourceOffsetSeconds + relativeEnd,
+          speakerLabel: identifiedName || speakerName(segment?.speaker),
+          identifiedName: identifiedName || null,
+          text
+        });
+      }
+      continue;
+    }
+
+    const text = normalizeText(part.text);
+    if (text) {
+      utterances.push({
+        id: utterances.length + 1,
+        partIndex,
+        sourceIndex,
+        sourceName: part.sourceName || "",
+        startSeconds: sourceOffsetSeconds,
+        endSeconds: sourceOffsetSeconds,
+        speakerLabel: "Спикер",
+        identifiedName: null,
+        text
+      });
+    }
+  }
+  return utterances;
+}
+
+function sourceHeader(sourceNames) {
+  const names = (Array.isArray(sourceNames) ? sourceNames : [sourceNames]).filter(Boolean);
+  if (names.length <= 1) return [`Исходный файл: ${names[0] || "не указан"}`];
+  return [
+    "Исходные файлы (в порядке обработки):",
+    ...names.map((name, index) => `${index + 1}. ${name}`)
+  ];
+}
+
+function formatTranscriptUtterances(utterances, {
+  sourceNames,
+  title,
+  createdAt = new Date()
+}) {
+  const identifiedNames = [...new Set(utterances
+    .map((utterance) => normalizeText(utterance.identifiedName))
+    .filter(Boolean))];
   const header = [
     "ПОЛНАЯ РАСШИФРОВКА СОЗВОНА",
-    `Исходный файл: ${sourceName}`,
+    ...(title ? [`Название: ${title}`] : []),
+    ...sourceHeader(sourceNames),
     `Создано: ${createdAt.toLocaleString("ru-RU")}`,
     ...(identifiedNames.length > 0
       ? [
         `Имена, определённые по видео: ${identifiedNames.join(", ")}`,
-        "Примечание: имена добавлены только при повторном уверенном совпадении подписи и индикатора говорящего."
+        "Примечание: имена добавлены только при повторном совпадении читаемой подписи и видимого индикатора говорящего."
       ]
-      : ["Примечание: при длинной записи обозначения спикеров могут начинаться заново в каждой части."])
-  ].join("\n");
+      : ["Примечание: нейтральные обозначения спикеров могут начинаться заново после каждого аудиофрагмента."])
+  ];
 
-  const body = parts
-    .map((part, index) => {
-      const formatted = formatPart(part);
-      if (!formatted) return "";
-      return `\nЧАСТЬ ${index + 1}\n${formatted}`;
-    })
-    .filter(Boolean)
-    .join("\n");
+  const body = [];
+  let previousSource = null;
+  const multipleSources = new Set(utterances.map((utterance) => utterance.sourceIndex)).size > 1;
+  for (const utterance of utterances) {
+    if (multipleSources && utterance.sourceIndex !== previousSource) {
+      const visibleName = sourceNames?.[utterance.sourceIndex] || utterance.sourceName || `Файл ${utterance.sourceIndex + 1}`;
+      body.push("", `ФАЙЛ ${utterance.sourceIndex + 1} — ${visibleName}`);
+      previousSource = utterance.sourceIndex;
+    }
+    const start = formatTimestamp(utterance.startSeconds);
+    const end = formatTimestamp(utterance.endSeconds);
+    body.push(`[${start}–${end}] ${utterance.speakerLabel}: ${utterance.text}`);
+  }
+  return `${header.join("\n")}\n${body.join("\n")}\n`;
+}
 
-  return `${header}\n${body}\n`;
+function formatFullTranscript(parts, { sourceName, createdAt = new Date() }) {
+  return formatTranscriptUtterances(flattenTranscriptParts(parts), {
+    sourceNames: [sourceName],
+    createdAt
+  });
 }
 
 module.exports = {
+  flattenTranscriptParts,
   formatFullTranscript,
   formatPart,
   formatTimestamp,
+  formatTranscriptUtterances,
   normalizeText,
+  sourceHeader,
   speakerName
 };

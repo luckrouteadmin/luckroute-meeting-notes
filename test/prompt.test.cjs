@@ -14,8 +14,9 @@ test("шаблон сохраняет согласованную структу�
     "ИТОГИ"
   ];
   for (const heading of headings) assert.match(SUMMARY_INSTRUCTIONS, new RegExp(heading));
-  assert.match(SUMMARY_INSTRUCTIONS, /несколько самостоятельных созвонов/i);
   assert.match(SUMMARY_INSTRUCTIONS, /личные моменты/i);
+  assert.match(SUMMARY_INSTRUCTIONS, /аргументы и возражения/i);
+  assert.match(SUMMARY_INSTRUCTIONS, /5–10 содержательных предложений/i);
 });
 
 test("расшифровка явно отделяется от инструкций", () => {

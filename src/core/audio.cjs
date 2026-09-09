@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const { spawn } = require("node:child_process");
 const { CancelledError } = require("./errors.cjs");
 
-const AUDIO_CHUNK_SECONDS = 20 * 60;
+const AUDIO_CHUNK_SECONDS = 10 * 60;
 
 function resolveFfmpegPath() {
   if (process.env.MEETING_NOTES_FFMPEG_PATH) {
@@ -21,6 +21,7 @@ function resolveFfmpegPath() {
 function buildFfmpegArgs(inputPath, outputPattern) {
   return [
     "-y",
+    "-nostdin",
     "-hide_banner",
     "-loglevel", "error",
     "-i", inputPath,

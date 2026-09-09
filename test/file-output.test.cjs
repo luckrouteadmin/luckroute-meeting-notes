@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { chooseOutputPaths, sanitizeStem } = require("../src/core/file-output.cjs");
+const { chooseOutputPaths, deriveOutputStem, sanitizeStem } = require("../src/core/file-output.cjs");
 
 test("имя исходного видео очищается от недопустимых символов", () => {
   assert.equal(sanitizeStem('  Созвон: продажи?  '), "Созвон продажи");
@@ -21,3 +21,12 @@ test("существующие результаты не перезаписыв�
   assert.equal(path.basename(result.transcriptPath), "План (2) — расшифровка.txt");
 });
 
+
+test("несколько видео получают понятное общее имя", () => {
+  const result = deriveOutputStem([
+    "/tmp/Еженедельный созвон 01.mp4",
+    "/tmp/Еженедельный созвон 02.mp4"
+  ]);
+  assert.match(result, /Еженедельный созвон/);
+  assert.match(result, /объединено/);
+});

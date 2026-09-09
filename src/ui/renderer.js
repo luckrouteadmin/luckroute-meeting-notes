@@ -8,7 +8,10 @@ const elements = {
   chooseVideoButton: document.querySelector("#chooseVideoButton"),
   chooseOutputButton: document.querySelector("#chooseOutputButton"),
   identifySpeakersCheckbox: document.querySelector("#identifySpeakersCheckbox"),
+  splitMeetingsCheckbox: document.querySelector("#splitMeetingsCheckbox"),
   videoPath: document.querySelector("#videoPath"),
+  videoList: document.querySelector("#videoList"),
+  videoOrderHint: document.querySelector("#videoOrderHint"),
   outputPath: document.querySelector("#outputPath"),
   startButton: document.querySelector("#startButton"),
   cancelButton: document.querySelector("#cancelButton"),
@@ -16,11 +19,14 @@ const elements = {
   progressMessage: document.querySelector("#progressMessage"),
   progressPercent: document.querySelector("#progressPercent"),
   progressBar: document.querySelector("#progressBar"),
+  elapsedTime: document.querySelector("#elapsedTime"),
   resultSection: document.querySelector("#resultSection"),
   resultTitle: document.querySelector("#resultTitle"),
   resultMessage: document.querySelector("#resultMessage"),
   showResultButton: document.querySelector("#showResultButton"),
   errorMessage: document.querySelector("#errorMessage"),
+  errorActions: document.querySelector("#errorActions"),
+  showLogButton: document.querySelector("#showLogButton"),
   versionLabel: document.querySelector("#versionLabel"),
   settingsDialog: document.querySelector("#settingsDialog"),
   settingsForm: document.querySelector("#settingsForm"),
@@ -33,11 +39,14 @@ const elements = {
 };
 
 const state = {
-  videoPath: null,
+  videoPaths: [],
   outputDirectory: null,
   hasApiKey: false,
   running: false,
-  revealPath: null
+  revealPath: null,
+  logPath: null,
+  elapsedTimer: null,
+  startedAt: 0
 };
 
 function basename(filePath) {
@@ -50,11 +59,64 @@ function displayPath(element, value, placeholder) {
   element.classList.toggle("empty", !value);
 }
 
+function displayVideos(videoPaths) {
+  elements.videoList.replaceChildren();
+  if (videoPaths.length === 0) {
+    displayPath(elements.videoPath, null, "MP4-файлы не выбраны");
+    elements.videoList.hidden = true;
+    elements.videoOrderHint.hidden = true;
+    return;
+  }
+  if (videoPaths.length === 1) {
+    displayPath(elements.videoPath, videoPaths[0], "MP4-файл не выбран");
+    elements.videoList.hidden = true;
+    elements.videoOrderHint.hidden = true;
+    return;
+  }
+
+  elements.videoPath.textContent = `Выбрано файлов: ${videoPaths.length}`;
+  elements.videoPath.title = videoPaths.join("\n");
+  elements.videoPath.classList.remove("empty");
+  for (const filePath of videoPaths) {
+    const item = document.createElement("li");
+    item.textContent = basename(filePath);
+    item.title = filePath;
+    elements.videoList.append(item);
+  }
+  elements.videoList.hidden = false;
+  elements.videoOrderHint.hidden = false;
+}
+
+function formatElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return hours > 0
+    ? [hours, minutes, rest].map((part) => String(part).padStart(2, "0")).join(":")
+    : [minutes, rest].map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function startElapsedTimer() {
+  state.startedAt = Date.now();
+  const update = () => {
+    elements.elapsedTime.textContent = `Прошло: ${formatElapsed(Date.now() - state.startedAt)}`;
+  };
+  update();
+  state.elapsedTimer = setInterval(update, 1000);
+}
+
+function stopElapsedTimer() {
+  if (state.elapsedTimer) clearInterval(state.elapsedTimer);
+  state.elapsedTimer = null;
+}
+
 function updateControls() {
-  elements.startButton.disabled = state.running || !state.videoPath || !state.outputDirectory;
+  elements.startButton.disabled = state.running || state.videoPaths.length === 0 || !state.outputDirectory;
   elements.chooseVideoButton.disabled = state.running;
   elements.chooseOutputButton.disabled = state.running;
   elements.identifySpeakersCheckbox.disabled = state.running;
+  elements.splitMeetingsCheckbox.disabled = state.running;
   elements.settingsButton.disabled = state.running;
   elements.cancelButton.hidden = !state.running;
   elements.keyNotice.hidden = state.hasApiKey;
@@ -63,12 +125,16 @@ function updateControls() {
 
 function hideMessages() {
   elements.errorMessage.hidden = true;
+  elements.errorActions.hidden = true;
   elements.resultSection.hidden = true;
+  state.logPath = null;
 }
 
-function showError(message) {
+function showError(message, logPath) {
   elements.errorMessage.textContent = message;
   elements.errorMessage.hidden = false;
+  state.logPath = logPath || null;
+  elements.errorActions.hidden = !state.logPath;
 }
 
 function openSettings() {
@@ -93,8 +159,8 @@ elements.cancelSettingsButton.addEventListener("click", closeSettings);
 elements.chooseVideoButton.addEventListener("click", async () => {
   const selected = await api.chooseVideo();
   if (!selected) return;
-  state.videoPath = selected;
-  displayPath(elements.videoPath, selected, "MP4-файл не выбран");
+  state.videoPaths = Array.isArray(selected) ? selected : [selected];
+  displayVideos(state.videoPaths);
   hideMessages();
   updateControls();
 });
@@ -149,15 +215,27 @@ elements.startButton.addEventListener("click", async () => {
   elements.progressPercent.textContent = "0%";
   elements.progressMessage.textContent = "Подготовка…";
   elements.progressSection.hidden = false;
+  startElapsedTimer();
   updateControls();
 
-  const result = await api.start({
-    videoPath: state.videoPath,
-    outputDirectory: state.outputDirectory,
-    identifySpeakers: elements.identifySpeakersCheckbox.checked
-  });
+  let result;
+  try {
+    result = await api.start({
+      videoPaths: state.videoPaths,
+      outputDirectory: state.outputDirectory,
+      identifySpeakers: elements.identifySpeakersCheckbox.checked,
+      splitMeetings: elements.splitMeetingsCheckbox.checked
+    });
+  } catch {
+    result = {
+      ok: false,
+      code: "IPC_ERROR",
+      error: "Приложение не смогло завершить обработку. Перезапустите его и повторите — готовые части будут восстановлены."
+    };
+  }
 
   state.running = false;
+  stopElapsedTimer();
   elements.progressSection.hidden = true;
   updateControls();
 
@@ -166,22 +244,34 @@ elements.startButton.addEventListener("click", async () => {
       state.hasApiKey = false;
       updateControls();
     }
-    if (result.code !== "CANCELLED") showError(result.error);
-    if (result.transcriptPath) {
-      state.revealPath = result.transcriptPath;
-      elements.resultTitle.textContent = "Расшифровка сохранена";
-      elements.resultMessage.textContent = basename(result.transcriptPath);
-      elements.showResultButton.textContent = "Показать файл";
+    if (result.code !== "CANCELLED") showError(result.error, result.logPath);
+    const createdFiles = Array.isArray(result.createdFiles) ? result.createdFiles : [];
+    if (result.transcriptPath || createdFiles.length > 0) {
+      state.revealPath = result.transcriptPath || createdFiles[0];
+      elements.resultTitle.textContent = "Готовые файлы сохранены";
+      elements.resultMessage.textContent = `Сохранено до сбоя: ${Math.max(1, createdFiles.length)}`;
+      elements.showResultButton.textContent = "Показать файлы";
       elements.resultSection.hidden = false;
     }
     return;
   }
 
   state.revealPath = result.summaryPath;
-  elements.resultTitle.textContent = "Готово — сохранены два TXT-файла";
-  elements.resultMessage.textContent = result.identifiedSpeakerCount > 0
-    ? `${basename(result.summaryPath)} · имён определено: ${result.identifiedSpeakerCount}`
-    : basename(result.summaryPath);
+  const fileCount = Array.isArray(result.files) ? result.files.length : 2;
+  const meetingCount = Number(result.meetingCount) || 1;
+  if (result.splitDetectionSkipped) {
+    elements.resultTitle.textContent = "Готово — сохранено как один созвон";
+    elements.resultMessage.textContent = `Автоматическое разделение не сработало · TXT-файлов: ${fileCount}`;
+  } else if (meetingCount > 1) {
+    elements.resultTitle.textContent = `Готово — найдено созвонов: ${meetingCount}`;
+    elements.resultMessage.textContent = `Сохранено TXT-файлов: ${fileCount}`;
+  } else {
+    elements.resultTitle.textContent = "Готово — сохранены два TXT-файла";
+    elements.resultMessage.textContent = "Расшифровка и подробная сводка готовы";
+  }
+  if (result.identifiedSpeakerCount > 0) {
+    elements.resultMessage.textContent += ` · имён: ${result.identifiedSpeakerCount}`;
+  }
   elements.showResultButton.textContent = "Показать файлы";
   elements.resultSection.hidden = false;
 });
@@ -197,6 +287,10 @@ elements.showResultButton.addEventListener("click", () => {
   if (state.revealPath) api.revealFile(state.revealPath);
 });
 
+elements.showLogButton.addEventListener("click", () => {
+  if (state.logPath) api.revealFile(state.logPath);
+});
+
 api.onProgress((progress) => {
   const percent = Math.max(0, Math.min(100, Number(progress?.percent) || 0));
   elements.progressBar.value = percent;
@@ -208,6 +302,7 @@ async function initialize() {
   const initial = await api.getState();
   state.hasApiKey = initial.hasApiKey;
   elements.versionLabel.textContent = `Версия ${initial.version}`;
+  displayVideos([]);
   updateControls();
 }
 

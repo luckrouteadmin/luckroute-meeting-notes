@@ -5,6 +5,7 @@ const os = require("node:os");
 const fs = require("node:fs/promises");
 const { splitAudio, AUDIO_CHUNK_SECONDS } = require("./audio.cjs");
 const {
+  detectMeetingBoundaries,
   identifySpeakersFromFrames,
   transcribeAudioFile,
   summarizeTranscript
@@ -15,76 +16,219 @@ const {
   applySpeakerNames,
   selectSpeakerSamples
 } = require("./speaker-identity.cjs");
-const { formatFullTranscript } = require("./transcript.cjs");
+const {
+  flattenTranscriptParts,
+  formatTranscriptUtterances
+} = require("./transcript.cjs");
 const {
   atomicWriteText,
-  chooseOutputPaths,
+  chooseMeetingOutputPaths,
+  deriveOutputStem,
   formatSummaryFile
 } = require("./file-output.cjs");
-const { CancelledError } = require("./errors.cjs");
+const {
+  normalizeMeetingRanges,
+  splitUtterancesByMeetings
+} = require("./meeting-boundaries.cjs");
+const { openCheckpoint } = require("./checkpoint.cjs");
+const { CancelledError, isCancelled } = require("./errors.cjs");
 
-async function validateInputs(videoPath, outputDirectory) {
-  if (typeof videoPath !== "string" || !path.isAbsolute(videoPath) || path.extname(videoPath).toLowerCase() !== ".mp4") {
-    throw new Error("Выберите MP4-файл с записью созвона.");
+const MAX_VIDEO_FILES = 20;
+const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
+
+function normalizeVideoPaths(videoPaths, legacyVideoPath) {
+  const candidates = Array.isArray(videoPaths)
+    ? videoPaths
+    : typeof videoPaths === "string"
+      ? [videoPaths]
+      : [legacyVideoPath];
+  const unique = new Map();
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.trim()) continue;
+    const resolved = path.resolve(candidate);
+    const key = process.platform === "linux" ? resolved : resolved.toLocaleLowerCase();
+    if (!unique.has(key)) unique.set(key, resolved);
+  }
+  return [...unique.values()].sort((left, right) => (
+    VIDEO_COLLATOR.compare(path.basename(left), path.basename(right))
+    || VIDEO_COLLATOR.compare(left, right)
+  ));
+}
+
+async function validateInputs(videoPaths, outputDirectory, legacyVideoPath) {
+  const normalizedPaths = normalizeVideoPaths(videoPaths, legacyVideoPath);
+  if (normalizedPaths.length === 0) {
+    throw new Error("Выберите один или несколько MP4-файлов с записью созвона.");
+  }
+  if (normalizedPaths.length > MAX_VIDEO_FILES) {
+    throw new Error(`За один запуск можно выбрать не более ${MAX_VIDEO_FILES} MP4-файлов.`);
+  }
+  for (const videoPath of normalizedPaths) {
+    if (!path.isAbsolute(videoPath) || path.extname(videoPath).toLowerCase() !== ".mp4") {
+      throw new Error("Все выбранные записи должны быть MP4-файлами.");
+    }
   }
   if (typeof outputDirectory !== "string" || !path.isAbsolute(outputDirectory)) {
     throw new Error("Выберите папку для сохранения результата.");
   }
-  const [videoStat, outputStat] = await Promise.all([fs.stat(videoPath), fs.stat(outputDirectory)]);
-  if (!videoStat.isFile()) throw new Error("Выбранный MP4 не является файлом.");
-  if (!outputStat.isDirectory()) throw new Error("Выбранное место сохранения не является папкой.");
+
+  const [videoStats, outputStat] = await Promise.all([
+    Promise.all(normalizedPaths.map((videoPath) => fs.stat(videoPath))),
+    fs.stat(outputDirectory)
+  ]);
+  if (videoStats.some((stat) => !stat.isFile())) {
+    throw new Error("Одна из выбранных записей не является файлом.");
+  }
+  if (!outputStat.isDirectory()) {
+    throw new Error("Выбранное место сохранения не является папкой.");
+  }
+  return normalizedPaths;
+}
+
+function createMemoryCheckpoint() {
+  const transcriptions = {};
+  return {
+    get: (key) => transcriptions[key] || null,
+    set: async (key, value) => { transcriptions[key] = value; },
+    remove: async () => {}
+  };
+}
+
+function retryProgress(onProgress, percent, subject) {
+  return ({ nextAttempt, maxAttempts }) => onProgress({
+    stage: "network-retry",
+    percent,
+    message: `Связь прервалась при ${subject} — повторяю запрос ${nextAttempt} из ${maxAttempts}…`
+  });
 }
 
 async function runMeetingWorkflow({
   videoPath,
+  videoPaths,
   outputDirectory,
   apiKey,
   identifySpeakers = true,
+  splitMeetings = false,
+  checkpointDirectory,
   signal,
   fetchImpl,
   onProgress = () => {},
   dependencies = {}
 }) {
-  await validateInputs(videoPath, outputDirectory);
+  const normalizedVideoPaths = await validateInputs(videoPaths, outputDirectory, videoPath);
   if (signal?.aborted) throw new CancelledError();
 
-  const sourceName = path.basename(videoPath);
-  const originalStem = path.basename(videoPath, path.extname(videoPath));
-  const outputPaths = await chooseOutputPaths(outputDirectory, originalStem);
+  const sources = normalizedVideoPaths.map((sourcePath, sourceIndex) => ({
+    sourceIndex,
+    sourcePath,
+    sourceName: path.basename(sourcePath)
+  }));
+  const sourceNames = sources.map((source) => source.sourceName);
+  const outputStem = deriveOutputStem(normalizedVideoPaths);
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-notes-"));
   const splitAudioImpl = dependencies.splitAudio || splitAudio;
   const transcribeImpl = dependencies.transcribeAudioFile || transcribeAudioFile;
   const summarizeImpl = dependencies.summarizeTranscript || summarizeTranscript;
   const extractFramesImpl = dependencies.extractSpeakerFrames || extractSpeakerFrames;
   const identifyFramesImpl = dependencies.identifySpeakersFromFrames || identifySpeakersFromFrames;
+  const detectBoundariesImpl = dependencies.detectMeetingBoundaries || detectMeetingBoundaries;
+  const openCheckpointImpl = dependencies.openCheckpoint || openCheckpoint;
+  const createdFiles = [];
+  let checkpoint;
 
   try {
-    onProgress({ stage: "audio", percent: 4, message: "Извлекаю звук из видео…" });
-    const chunks = await splitAudioImpl({
-      inputPath: videoPath,
-      outputDirectory: temporaryDirectory,
-      signal
-    });
-
-    const parts = [];
-    for (let index = 0; index < chunks.length; index += 1) {
-      if (signal?.aborted) throw new CancelledError();
+    try {
+      checkpoint = await openCheckpointImpl({
+        directory: checkpointDirectory,
+        videoPaths: normalizedVideoPaths
+      });
+    } catch {
+      checkpoint = createMemoryCheckpoint();
       onProgress({
-        stage: "transcription",
-        percent: 10 + Math.round(((index + 1) / chunks.length) * 45),
-        message: `Расшифровываю часть ${index + 1} из ${chunks.length}…`
+        stage: "checkpoint-unavailable",
+        percent: 1,
+        message: "Не удалось включить восстановление, но обработка продолжится."
       });
-      const result = await transcribeImpl({
-        filePath: chunks[index],
-        apiKey,
-        signal,
-        fetchImpl
+    }
+
+    const chunkGroups = [];
+    for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+      if (signal?.aborted) throw new CancelledError();
+      const source = sources[sourceIndex];
+      const audioDirectory = path.join(
+        temporaryDirectory,
+        `audio-${String(sourceIndex + 1).padStart(2, "0")}`
+      );
+      await fs.mkdir(audioDirectory, { recursive: true });
+      onProgress({
+        stage: "audio",
+        percent: 3 + Math.round(((sourceIndex + 1) / sources.length) * 8),
+        message: sources.length > 1
+          ? `Извлекаю звук: файл ${sourceIndex + 1} из ${sources.length}…`
+          : "Извлекаю звук из видео…"
       });
-      parts.push({
-        text: result.text || "",
-        segments: result.segments || [],
-        offsetSeconds: index * AUDIO_CHUNK_SECONDS
+      const chunks = await splitAudioImpl({
+        inputPath: source.sourcePath,
+        outputDirectory: audioDirectory,
+        signal
       });
+      chunkGroups.push({ ...source, chunks });
+    }
+
+    const totalChunks = chunkGroups.reduce((sum, group) => sum + group.chunks.length, 0);
+    const parts = [];
+    let completedChunks = 0;
+    let checkpointWarningShown = false;
+    for (const group of chunkGroups) {
+      for (let chunkIndex = 0; chunkIndex < group.chunks.length; chunkIndex += 1) {
+        if (signal?.aborted) throw new CancelledError();
+        const progressPercent = 12 + Math.round(((completedChunks + 1) / totalChunks) * 43);
+        const checkpointKey = `${group.sourceIndex}:${chunkIndex}`;
+        let result = checkpoint.get(checkpointKey);
+        onProgress({
+          stage: result ? "transcription-restored" : "transcription",
+          percent: progressPercent,
+          message: result
+            ? `Восстанавливаю готовую часть ${completedChunks + 1} из ${totalChunks}…`
+            : `Расшифровываю часть ${completedChunks + 1} из ${totalChunks}…`
+        });
+        if (!result) {
+          result = await transcribeImpl({
+            filePath: group.chunks[chunkIndex],
+            apiKey,
+            signal,
+            fetchImpl,
+            onRetry: retryProgress(onProgress, progressPercent, "расшифровке")
+          });
+          try {
+            await checkpoint.set(checkpointKey, {
+              text: result.text || "",
+              segments: Array.isArray(result.segments) ? result.segments : []
+            });
+          } catch {
+            checkpoint = createMemoryCheckpoint();
+            if (!checkpointWarningShown) {
+              checkpointWarningShown = true;
+              onProgress({
+                stage: "checkpoint-unavailable",
+                percent: progressPercent,
+                message: "Не удалось сохранить точку восстановления, но обработка продолжается."
+              });
+            }
+          }
+        }
+        parts.push({
+          text: result.text || "",
+          segments: Array.isArray(result.segments) ? result.segments : [],
+          sourceIndex: group.sourceIndex,
+          sourceName: group.sourceName,
+          sourcePath: group.sourcePath,
+          chunkIndex,
+          sourceOffsetSeconds: chunkIndex * AUDIO_CHUNK_SECONDS,
+          offsetSeconds: chunkIndex * AUDIO_CHUNK_SECONDS
+        });
+        completedChunks += 1;
+      }
     }
 
     let resolvedParts = parts;
@@ -92,16 +236,18 @@ async function runMeetingWorkflow({
     if (identifySpeakers) {
       const samples = selectSpeakerSamples(parts);
       if (samples.length > 0) {
+        const framesDirectory = path.join(temporaryDirectory, "speaker-frames");
+        await fs.mkdir(framesDirectory, { recursive: true });
         onProgress({
           stage: "speaker-identification",
           percent: 58,
-          message: "Определяю имена участников по видео…"
+          message: `Подготавливаю кадры для определения имён: ${samples.length}…`
         });
         try {
           const frames = await extractFramesImpl({
-            inputPath: videoPath,
+            inputPath: normalizedVideoPaths[0],
             samples,
-            outputDirectory: temporaryDirectory,
+            outputDirectory: framesDirectory,
             signal
           });
           if (frames.length > 0) {
@@ -109,57 +255,154 @@ async function runMeetingWorkflow({
               samples: frames,
               apiKey,
               signal,
-              fetchImpl
+              fetchImpl,
+              onProgress: ({ completedBatches, totalBatches, message }) => onProgress({
+                stage: "speaker-identification",
+                percent: 60 + Math.round((completedBatches / Math.max(1, totalBatches)) * 7),
+                message
+              }),
+              onRetry: retryProgress(onProgress, 63, "определении имён")
             });
             const mappings = aggregateSpeakerNames(frames, observations);
-            identifiedSpeakerCount = Object.keys(mappings).length;
+            identifiedSpeakerCount = new Set(Object.values(mappings)).size;
             resolvedParts = applySpeakerNames(parts, mappings);
           }
         } catch (error) {
-          if (signal?.aborted || error instanceof CancelledError) throw new CancelledError();
+          if (signal?.aborted || isCancelled(error)) throw new CancelledError();
           onProgress({
             stage: "speaker-identification-skipped",
-            percent: 61,
+            percent: 67,
             message: "Имена определить не удалось — продолжаю с нейтральными метками спикеров."
           });
         }
       }
     }
 
-    const createdAt = new Date();
-    const transcript = formatFullTranscript(resolvedParts, { sourceName, createdAt });
-    await atomicWriteText(outputPaths.transcriptPath, transcript);
-    onProgress({
-      stage: "saved-transcript",
-      percent: 66,
-      message: identifiedSpeakerCount > 0
-        ? `Полная расшифровка сохранена. Определено имён: ${identifiedSpeakerCount}.`
-        : "Полная расшифровка сохранена."
-    });
-
-    let summary;
-    try {
-      summary = await summarizeImpl({
-        transcript,
-        apiKey,
-        signal,
-        fetchImpl,
-        onProgress
-      });
-    } catch (error) {
-      error.transcriptPath = outputPaths.transcriptPath;
+    const utterances = flattenTranscriptParts(resolvedParts);
+    if (utterances.length === 0) {
+      const error = new Error("В записи не удалось распознать речь.");
+      error.code = "EMPTY_TRANSCRIPT";
       throw error;
     }
 
-    await atomicWriteText(
-      outputPaths.summaryPath,
-      formatSummaryFile(summary, { sourceName, createdAt })
-    );
-    onProgress({ stage: "complete", percent: 100, message: "Готово: оба TXT-файла сохранены." });
-    return { ...outputPaths, identifiedSpeakerCount };
+    let ranges = normalizeMeetingRanges([], utterances.length);
+    let splitDetectionSkipped = false;
+    if (splitMeetings) {
+      onProgress({
+        stage: "meeting-boundaries",
+        percent: 69,
+        message: "Ищу границы отдельных созвонов…"
+      });
+      try {
+        const detected = await detectBoundariesImpl({
+          utterances,
+          apiKey,
+          signal,
+          fetchImpl,
+          onRetry: retryProgress(onProgress, 70, "поиске границ созвонов")
+        });
+        ranges = normalizeMeetingRanges(detected, utterances.length);
+      } catch (error) {
+        if (signal?.aborted || isCancelled(error)) throw new CancelledError();
+        splitDetectionSkipped = true;
+        onProgress({
+          stage: "meeting-boundaries-skipped",
+          percent: 72,
+          message: "Автоматическое разделение не удалось — сохраню запись как один созвон."
+        });
+      }
+    }
+
+    const meetings = splitUtterancesByMeetings(utterances, ranges);
+    const outputPairs = await chooseMeetingOutputPaths(outputDirectory, outputStem, meetings);
+    const createdAt = new Date();
+    const transcripts = [];
+    for (let index = 0; index < meetings.length; index += 1) {
+      const meeting = meetings[index];
+      const title = meetings.length > 1 ? meeting.title : undefined;
+      const transcript = formatTranscriptUtterances(meeting.utterances, {
+        sourceNames,
+        title,
+        createdAt
+      });
+      await atomicWriteText(outputPairs[index].transcriptPath, transcript);
+      createdFiles.push(outputPairs[index].transcriptPath);
+      transcripts.push(transcript);
+    }
+    onProgress({
+      stage: "saved-transcript",
+      percent: 75,
+      message: meetings.length > 1
+        ? `Сохранены расшифровки: ${meetings.length}. Формирую отдельные сводки…`
+        : identifiedSpeakerCount > 0
+          ? `Полная расшифровка сохранена. Определено имён: ${identifiedSpeakerCount}.`
+          : "Полная расшифровка сохранена."
+    });
+
+    for (let index = 0; index < meetings.length; index += 1) {
+      const progressStart = 76 + ((97 - 76) * index) / meetings.length;
+      const progressEnd = 76 + ((97 - 76) * (index + 1)) / meetings.length;
+      let summary;
+      try {
+        summary = await summarizeImpl({
+          transcript: transcripts[index],
+          apiKey,
+          signal,
+          fetchImpl,
+          onProgress,
+          progressStart,
+          progressEnd,
+          label: meetings.length > 1
+            ? `созвона ${index + 1} из ${meetings.length}`
+            : "созвона"
+        });
+      } catch (error) {
+        error.transcriptPath = outputPairs[index].transcriptPath;
+        throw error;
+      }
+      await atomicWriteText(
+        outputPairs[index].summaryPath,
+        formatSummaryFile(summary, {
+          sourceNames,
+          title: meetings.length > 1 ? meetings[index].title : undefined,
+          createdAt
+        })
+      );
+      createdFiles.push(outputPairs[index].summaryPath);
+    }
+
+    await checkpoint.remove().catch(() => {});
+    onProgress({
+      stage: "complete",
+      percent: 100,
+      message: meetings.length > 1
+        ? `Готово: создано созвонов — ${meetings.length}, TXT-файлов — ${createdFiles.length}.`
+        : "Готово: оба TXT-файла сохранены."
+    });
+    return {
+      transcriptPath: outputPairs[0].transcriptPath,
+      summaryPath: outputPairs[0].summaryPath,
+      files: createdFiles,
+      meetingCount: meetings.length,
+      identifiedSpeakerCount,
+      splitDetectionSkipped,
+      outputDirectory
+    };
+  } catch (error) {
+    if (createdFiles.length > 0) {
+      error.createdFiles = [...createdFiles];
+      error.transcriptPath ||= createdFiles.find((filePath) => filePath.endsWith("— расшифровка.txt")) || null;
+      error.outputDirectory = outputDirectory;
+    }
+    throw error;
   } finally {
     await fs.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-module.exports = { runMeetingWorkflow, validateInputs };
+module.exports = {
+  MAX_VIDEO_FILES,
+  normalizeVideoPaths,
+  runMeetingWorkflow,
+  validateInputs
+};

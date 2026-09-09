@@ -33,7 +33,7 @@ test("кадры выбираются отдельно для каждого с�
   assert.equal(new Set(samples.map((sample) => sample.sampleId)).size, samples.length);
 });
 
-test("имя принимается только после двух совпадающих уверенных кадров", () => {
+test("имя принимается после двух согласованных кадров с достаточным весом", () => {
   const samples = [
     { sampleId: "frame-001", speakerKey: "0:A" },
     { sampleId: "frame-002", speakerKey: "0:A" },
@@ -57,7 +57,7 @@ test("имя принимается только после двух совпа�
     visible("frame-005", "Максим", "medium")
   ]);
 
-  assert.deepEqual(mappings, { "0:A": "Анастасия" });
+  assert.deepEqual(mappings, { "0:A": "Анастасия", "0:B": "Максим" });
 });
 
 test("имя без видимого индикатора говорящего не используется", () => {

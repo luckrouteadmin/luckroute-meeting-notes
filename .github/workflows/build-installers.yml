@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Test
-        run: npm test
+        run: npm run check && npm test
       - name: Build EXE installer
         run: npm run dist:win
       - uses: actions/upload-artifact@v4
@@ -87,3 +87,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" release-files/* --generate-notes --title "Сводка созвона $GITHUB_REF_NAME"
+
+  package-release:
+    name: Package release files
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create combined and source archives
+        shell: bash
+        run: |
+          mkdir -p bundle release
+          cp installers/*.exe installers/*.dmg bundle/
+          printf '%s\n'             'Сводка созвона 1.2.0'             ''             'Windows: запустите EXE и следуйте обычному мастеру установки.'             'macOS Apple Silicon: используйте DMG arm64.'             'macOS Intel: используйте DMG x64.'             ''             'В этой версии: несколько MP4 за один запуск, автоматическое разделение разных созвонов, улучшенное определение имён, подробные сводки и восстановление после сетевого сбоя.'             > bundle/README.txt
+          (cd bundle && zip -r ../release/Meeting-Notes-1.2.0-Windows-and-macOS.zip .)
+          git archive --format=zip --output=release/Meeting-Notes-1.2.0-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meeting-Notes-1.2.0-all
+          path: release/Meeting-Notes-1.2.0-Windows-and-macOS.zip
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Meeting-Notes-1.2.0-source
+          path: release/Meeting-Notes-1.2.0-source.zip
+          if-no-files-found: error
+          retention-days: 30

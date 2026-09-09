@@ -88,7 +88,9 @@ test("запрос сводки отключает хранение ответа
     fetchImpl: async (url, options) => {
       assert.match(url, /\/responses$/);
       const body = JSON.parse(options.body);
-      assert.equal(body.model, "gpt-5-mini");
+      assert.equal(body.model, "gpt-5.6");
+      assert.equal(body.reasoning.effort, "low");
+      assert.equal(body.text.verbosity, "high");
       assert.equal(body.store, false);
       assert.equal(body.instructions, "Инструкция");
       return new Response(JSON.stringify({

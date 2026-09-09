@@ -133,3 +133,45 @@ test("при сбое сводки уже готовая расшифровка 
   assert.ok(capturedError.transcriptPath);
   assert.match(await fs.readFile(capturedError.transcriptPath, "utf8"), /Важный текст/);
 });
+
+test("несколько MP4 сортируются естественно и делятся на отдельные созвоны", async (t) => {
+  const paths = await fixture(t);
+  const secondVideo = path.join(path.dirname(paths.videoPath), "План продаж 2.mp4");
+  await fs.rename(paths.videoPath, path.join(path.dirname(paths.videoPath), "План продаж 10.mp4"));
+  const tenthVideo = path.join(path.dirname(paths.videoPath), "План продаж 10.mp4");
+  await fs.writeFile(secondVideo, "fake mp4 2");
+  const transcribed = [];
+
+  const result = await runMeetingWorkflow({
+    videoPaths: [tenthVideo, secondVideo],
+    outputDirectory: paths.outputDirectory,
+    apiKey: "not-used",
+    identifySpeakers: false,
+    splitMeetings: true,
+    dependencies: {
+      splitAudio: fakeSplitAudio(),
+      transcribeAudioFile: async ({ filePath }) => {
+        const sourceFolder = path.basename(path.dirname(filePath));
+        transcribed.push(sourceFolder);
+        const index = transcribed.length;
+        return {
+          text: `Созвон ${index}`,
+          segments: [{ start: 0, end: 3, speaker: "A", text: `Созвон ${index}` }]
+        };
+      },
+      detectMeetingBoundaries: async ({ utterances }) => [
+        { title: "Продажи", start_segment_id: utterances[0].id, end_segment_id: utterances[0].id },
+        { title: "Маркетинг", start_segment_id: utterances[1].id, end_segment_id: utterances[1].id }
+      ],
+      summarizeTranscript: async ({ transcript }) => `КРАТКОЕ РЕЗЮМЕ\n${transcript.includes("Созвон 1") ? "Первая встреча" : "Вторая встреча"}.`
+    }
+  });
+
+  assert.equal(result.meetingCount, 2);
+  assert.equal(result.files.length, 4);
+  assert.equal(transcribed.length, 2);
+  assert.ok(result.files.every((filePath) => filePath.includes("созвон 0")));
+  const summaries = result.files.filter((filePath) => filePath.endsWith("сводка.txt"));
+  assert.equal(summaries.length, 2);
+  assert.match(await fs.readFile(summaries[0], "utf8"), /Название: Продажи/);
+});

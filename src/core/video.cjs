@@ -11,13 +11,14 @@ const FRAME_CONCURRENCY = 3;
 function buildFrameArgs(inputPath, timestampSeconds, outputPath) {
   return [
     "-y",
+    "-nostdin",
     "-hide_banner",
     "-loglevel", "error",
     "-ss", Math.max(0, Number(timestampSeconds) || 0).toFixed(3),
     "-i", inputPath,
     "-map", "0:v:0",
     "-frames:v", "1",
-    "-vf", "scale=1920:-2:force_original_aspect_ratio=decrease",
+    "-vf", "scale=2560:-2:force_original_aspect_ratio=decrease",
     "-q:v", "2",
     outputPath
   ];
@@ -75,7 +76,7 @@ async function extractSpeakerFrames({
       const framePath = path.join(outputDirectory, `${sample.sampleId}.jpg`);
       try {
         await extractFrame({
-          inputPath,
+          inputPath: sample.videoPath || inputPath,
           outputPath: framePath,
           timestampSeconds: sample.timestampSeconds,
           ffmpegPath,

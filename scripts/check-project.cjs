@@ -12,6 +12,8 @@ const requiredFiles = [
   "src/ui/styles.css",
   "src/ui/renderer.js",
   "src/core/workflow.cjs",
+  "src/core/checkpoint.cjs",
+  "src/core/meeting-boundaries.cjs",
   "src/core/openai-api.cjs",
   "src/core/speaker-identity.cjs",
   "src/core/video.cjs",
@@ -52,8 +54,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.1.1") {
-  throw new Error("Версия сборки должна быть 1.1.1.");
+if (packageJson.version !== "1.2.0") {
+  throw new Error("Версия сборки должна быть 1.2.0.");
 }
 
 const mainProcess = fs.readFileSync(path.join(root, "app/main.cjs"), "utf8");
@@ -62,8 +64,12 @@ if (!mainProcess.includes("net.fetch") || !mainProcess.includes("fetchImpl")) {
 }
 
 const interfaceHtml = fs.readFileSync(path.join(root, "src/ui/index.html"), "utf8");
-if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("отдельные временные кадры")) {
-  throw new Error("Интерфейс должен явно сообщать об анализе отдельных кадров.");
+if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("splitMeetingsCheckbox")) {
+  throw new Error("В интерфейсе должны быть настройки определения имён и разделения созвонов.");
+}
+
+if (!mainProcess.includes("powerSaveBlocker") || !mainProcess.includes("multiSelections")) {
+  throw new Error("Главный процесс должен защищать долгую обработку и поддерживать несколько MP4.");
 }
 
 const prompt = fs.readFileSync(path.join(root, "src/core/prompt.cjs"), "utf8");

@@ -8,6 +8,7 @@ const {
   dialog,
   ipcMain,
   net,
+  powerSaveBlocker,
   safeStorage,
   shell
 } = require("electron");
@@ -16,15 +17,18 @@ const { runMeetingWorkflow } = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
 
 const SETTINGS_FILE = "settings.json";
+const LOG_FILE = "meeting-notes.log";
+const MAX_LOG_BYTES = 2 * 1024 * 1024;
+const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 let mainWindow = null;
 let activeJob = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 780,
-    height: 770,
-    minWidth: 680,
-    minHeight: 700,
+    width: 820,
+    height: 860,
+    minWidth: 700,
+    minHeight: 740,
     show: false,
     title: "Сводка созвона",
     backgroundColor: "#f5f3ee",
@@ -49,6 +53,44 @@ function createWindow() {
 
 function settingsPath() {
   return path.join(app.getPath("userData"), SETTINGS_FILE);
+}
+
+function diagnosticLogPath() {
+  return path.join(app.getPath("userData"), "logs", LOG_FILE);
+}
+
+async function appendDiagnosticLog(event, details = {}) {
+  const destination = diagnosticLogPath();
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  try {
+    const stat = await fs.stat(destination);
+    if (stat.size > MAX_LOG_BYTES) {
+      const previous = `${destination}.previous`;
+      await fs.rm(previous, { force: true });
+      await fs.rename(destination, previous);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  const record = {
+    time: new Date().toISOString(),
+    event,
+    ...details
+  };
+  await fs.appendFile(destination, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+}
+
+function errorForLog(error) {
+  return {
+    name: error?.name || "Error",
+    code: error?.code || null,
+    status: error?.status || null,
+    message: String(error?.message || error || "Unknown error").slice(0, 2000),
+    stack: typeof error?.stack === "string" ? error.stack.slice(0, 8000) : null
+  };
 }
 
 async function readSettings() {
@@ -106,6 +148,13 @@ function sendProgress(event, progress) {
   }
 }
 
+function sortVideoPaths(filePaths) {
+  return [...filePaths].sort((left, right) => (
+    VIDEO_COLLATOR.compare(path.basename(left), path.basename(right))
+    || VIDEO_COLLATOR.compare(left, right)
+  ));
+}
+
 function registerIpcHandlers() {
   ipcMain.handle("app:get-state", async () => ({
     version: app.getVersion(),
@@ -115,14 +164,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle("dialog:choose-video", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Выберите запись созвона",
-      properties: ["openFile"],
+      title: "Выберите одну или несколько записей созвона",
+      properties: ["openFile", "multiSelections"],
       filters: [
         { name: "Видео MP4", extensions: ["mp4"] },
         { name: "Все файлы", extensions: ["*"] }
       ]
     });
-    return result.canceled ? null : result.filePaths[0];
+    return result.canceled ? null : sortVideoPaths(result.filePaths);
   });
 
   ipcMain.handle("dialog:choose-output", async () => {
@@ -158,28 +207,67 @@ function registerIpcHandlers() {
     }
 
     const controller = new AbortController();
-    activeJob = { controller };
+    let powerBlockerId = null;
+    try {
+      powerBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+    } catch {
+      powerBlockerId = null;
+    }
+    activeJob = { controller, powerBlockerId };
+
+    const sourceNames = Array.isArray(options?.videoPaths)
+      ? options.videoPaths.map((filePath) => path.basename(String(filePath)))
+      : [];
+    await appendDiagnosticLog("job-start", {
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      sourceFiles: sourceNames,
+      identifySpeakers: options?.identifySpeakers !== false,
+      splitMeetings: options?.splitMeetings === true
+    }).catch(() => {});
 
     try {
       const result = await runMeetingWorkflow({
-        videoPath: options?.videoPath,
+        videoPaths: options?.videoPaths,
         outputDirectory: options?.outputDirectory,
         identifySpeakers: options?.identifySpeakers !== false,
+        splitMeetings: options?.splitMeetings === true,
+        checkpointDirectory: path.join(app.getPath("userData"), "checkpoints"),
         apiKey,
         signal: controller.signal,
         fetchImpl: (input, init) => net.fetch(input, init),
-        onProgress: (progress) => sendProgress(event, progress)
+        onProgress: (progress) => {
+          sendProgress(event, progress);
+          void appendDiagnosticLog("progress", {
+            stage: progress?.stage,
+            percent: progress?.percent,
+            message: progress?.message
+          }).catch(() => {});
+        }
       });
+      await appendDiagnosticLog("job-complete", {
+        meetingCount: result.meetingCount,
+        fileCount: result.files?.length || 0,
+        identifiedSpeakerCount: result.identifiedSpeakerCount
+      }).catch(() => {});
       return { ok: true, ...result };
     } catch (error) {
       const userError = toUserError(error);
+      await appendDiagnosticLog("job-error", errorForLog(error)).catch(() => {});
       return {
         ok: false,
         code: userError.code,
         error: userError.message,
-        transcriptPath: error?.transcriptPath || null
+        transcriptPath: error?.transcriptPath || null,
+        createdFiles: error?.createdFiles || [],
+        outputDirectory: error?.outputDirectory || null,
+        logPath: diagnosticLogPath()
       };
     } finally {
+      if (
+        Number.isInteger(powerBlockerId)
+        && powerSaveBlocker.isStarted(powerBlockerId)
+      ) powerSaveBlocker.stop(powerBlockerId);
       activeJob = null;
     }
   });

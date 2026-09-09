@@ -17,7 +17,7 @@
         <div class="header-copy">
           <p class="eyebrow">LUCKROUTE</p>
           <h1>Сводка созвона</h1>
-          <p class="subtitle">Из MP4 — в полную расшифровку и готовую сводку</p>
+          <p class="subtitle">Из одного или нескольких MP4 — в расшифровку и подробную сводку</p>
         </div>
         <button id="settingsButton" class="icon-button" type="button" title="Настройки OpenAI" aria-label="Открыть настройки">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -30,7 +30,7 @@
       <section id="keyNotice" class="notice" hidden>
         <div>
           <strong>Нужна однократная настройка</strong>
-          <span>Сохраните API-ключ OpenAI — после этого останутся только выбор файла и один запуск.</span>
+          <span>Сохраните API-ключ OpenAI — после этого останутся выбор файлов и один запуск.</span>
         </div>
         <button id="noticeSettingsButton" class="text-button" type="button">Настроить</button>
       </section>
@@ -39,7 +39,9 @@
         <div class="step-number">1</div>
         <div class="selection-content">
           <h2 id="sourceHeading">Видео созвона</h2>
-          <p id="videoPath" class="path-value empty">MP4-файл не выбран</p>
+          <p id="videoPath" class="path-value empty">MP4-файлы не выбраны</p>
+          <ol id="videoList" class="video-list" hidden></ol>
+          <small id="videoOrderHint" class="selection-hint" hidden>Файлы будут обработаны по порядку их названий.</small>
         </div>
         <button id="chooseVideoButton" class="secondary-button" type="button">Выбрать MP4</button>
       </section>
@@ -53,13 +55,23 @@
         <button id="chooseOutputButton" class="secondary-button" type="button">Выбрать папку</button>
       </section>
 
-      <label class="video-analysis-option" for="identifySpeakersCheckbox">
-        <input id="identifySpeakersCheckbox" type="checkbox" checked>
-        <span>
-          <strong>Определять имена участников по видео</strong>
-          <small>В OpenAI отправятся отдельные временные кадры с подписями и индикатором говорящего. После обработки они будут удалены.</small>
-        </span>
-      </label>
+      <div class="options-stack">
+        <label class="analysis-option" for="identifySpeakersCheckbox">
+          <input id="identifySpeakersCheckbox" type="checkbox" checked>
+          <span>
+            <strong>Определять имена участников по видео</strong>
+            <small>Программа проверит несколько кадров каждого говорящего и использует имя только при повторном совпадении подписи с индикатором речи.</small>
+          </span>
+        </label>
+
+        <label class="analysis-option split-option" for="splitMeetingsCheckbox">
+          <input id="splitMeetingsCheckbox" type="checkbox">
+          <span>
+            <strong>В видеофайлах несколько разных созвонов</strong>
+            <small>Программа найдёт явные границы встреч и создаст отдельную расшифровку и сводку для каждого созвона.</small>
+          </span>
+        </label>
+      </div>
 
       <section id="progressSection" class="progress-card" hidden aria-live="polite">
         <div class="progress-copy">
@@ -67,19 +79,22 @@
           <strong id="progressPercent">0%</strong>
         </div>
         <progress id="progressBar" max="100" value="0">0%</progress>
-        <p>Можно оставить приложение открытым в фоне. Длинные записи обрабатываются дольше.</p>
+        <p><span id="elapsedTime">Прошло: 00:00</span> · Можно оставить приложение открытым в фоне. Готовые части сохраняются для продолжения после сбоя.</p>
       </section>
 
       <section id="resultSection" class="result-card" hidden aria-live="polite">
         <div class="result-icon" aria-hidden="true">✓</div>
         <div class="result-copy">
           <strong id="resultTitle">Готово</strong>
-          <span id="resultMessage">Оба файла сохранены.</span>
+          <span id="resultMessage">Файлы сохранены.</span>
         </div>
-        <button id="showResultButton" class="text-button" type="button">Показать файл</button>
+        <button id="showResultButton" class="text-button" type="button">Показать файлы</button>
       </section>
 
       <p id="errorMessage" class="error-message" hidden role="alert"></p>
+      <div id="errorActions" class="error-actions" hidden>
+        <button id="showLogButton" class="danger-text-button" type="button">Показать журнал диагностики</button>
+      </div>
 
       <div class="action-row">
         <button id="startButton" class="primary-button" type="button" disabled>
@@ -89,7 +104,7 @@
       </div>
 
       <footer>
-        <span>На выходе: полная расшифровка и сводка в TXT</span>
+        <span>На выходе: расшифровка и подробная сводка в TXT</span>
         <span id="versionLabel"></span>
       </footer>
     </main>
