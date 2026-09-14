@@ -22,7 +22,13 @@ const requiredFiles = [
   "build/entitlements.mac.plist",
   "build/icon.png",
   "build/icon.ico",
-  ".github/workflows/build-installers.yml"
+  ".github/workflows/build-installers.yml",
+  ".github/workflows/ci.yml",
+  ".github/workflows/codeql.yml",
+  ".github/dependabot.yml",
+  ".github/CODEOWNERS",
+  "SECURITY.md",
+  "package-lock.json"
 ];
 
 for (const relativePath of requiredFiles) {
@@ -54,8 +60,35 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.2.1") {
-  throw new Error("Версия сборки должна быть 1.2.1.");
+if (packageJson.version !== "1.2.2") {
+  throw new Error("Версия сборки должна быть 1.2.2.");
+}
+
+const lockJson = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
+if (lockJson.lockfileVersion !== 3 || lockJson.packages?.[""]?.version !== packageJson.version) {
+  throw new Error("package-lock.json должен фиксировать зависимости и совпадать с версией приложения.");
+}
+
+for (const relativePath of [
+  ".github/workflows/build-installers.yml",
+  ".github/workflows/ci.yml",
+  ".github/workflows/codeql.yml"
+]) {
+  const workflowText = fs.readFileSync(path.join(root, relativePath), "utf8");
+  for (const line of workflowText.split(/\r?\n/)) {
+    const match = line.match(/^\s*-?\s*uses:\s*[^@\s]+@([^\s#]+)/);
+    if (match && !/^[0-9a-f]{40}$/.test(match[1])) {
+      throw new Error(`GitHub Action в ${relativePath} должна быть закреплена полным SHA: ${line.trim()}`);
+    }
+  }
+}
+
+const releaseWorkflow = fs.readFileSync(path.join(root, ".github/workflows/build-installers.yml"), "utf8");
+if (/\n\s*push\s*:/.test(releaseWorkflow) || releaseWorkflow.includes("--clobber")) {
+  throw new Error("Релизы должны запускаться вручную и никогда не перезаписывать опубликованные файлы.");
+}
+for (const marker of ["npm ci", "SHA256SUMS.txt", "actions/attest@", "immutable"]) {
+  if (!releaseWorkflow.includes(marker)) throw new Error(`В защищённой сборке отсутствует: ${marker}`);
 }
 
 const mainProcess = fs.readFileSync(path.join(root, "app/main.cjs"), "utf8");
