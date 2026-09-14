@@ -54,7 +54,7 @@ function toUserError(error) {
     return { code: "FILE_NOT_FOUND", message: "Не удалось найти выбранный файл или папку." };
   }
   if (error?.code === "NO_AUDIO") {
-    return { code: "NO_AUDIO", message: "В выбранном MP4 не найдена звуковая дорожка." };
+    return { code: "NO_AUDIO", message: "В выбранном видеофайле не найдена звуковая дорожка." };
   }
   return {
     code: error?.code || "UNKNOWN_ERROR",

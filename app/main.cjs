@@ -13,12 +13,16 @@ const {
   shell
 } = require("electron");
 
-const { runMeetingWorkflow } = require("../src/core/workflow.cjs");
+const {
+  runMeetingWorkflow,
+  SUPPORTED_VIDEO_EXTENSIONS
+} = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
 
 const SETTINGS_FILE = "settings.json";
 const LOG_FILE = "meeting-notes.log";
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
+const VIDEO_DIALOG_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS.map((extension) => extension.slice(1));
 const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 let mainWindow = null;
 let activeJob = null;
@@ -167,7 +171,7 @@ function registerIpcHandlers() {
       title: "Выберите одну или несколько записей созвона",
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "Видео MP4", extensions: ["mp4"] },
+        { name: "Видео", extensions: VIDEO_DIALOG_EXTENSIONS },
         { name: "Все файлы", extensions: ["*"] }
       ]
     });

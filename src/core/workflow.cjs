@@ -34,7 +34,22 @@ const { openCheckpoint } = require("./checkpoint.cjs");
 const { CancelledError, isCancelled } = require("./errors.cjs");
 
 const MAX_VIDEO_FILES = 20;
+const SUPPORTED_VIDEO_EXTENSIONS = Object.freeze([
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".mkv",
+  ".avi",
+  ".webm"
+]);
+const SUPPORTED_VIDEO_EXTENSION_SET = new Set(SUPPORTED_VIDEO_EXTENSIONS);
+const SUPPORTED_VIDEO_FORMATS_TEXT = "MP4, MOV, M4V, MKV, AVI и WebM";
 const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
+
+function isSupportedVideoPath(videoPath) {
+  return typeof videoPath === "string"
+    && SUPPORTED_VIDEO_EXTENSION_SET.has(path.extname(videoPath).toLowerCase());
+}
 
 function normalizeVideoPaths(videoPaths, legacyVideoPath) {
   const candidates = Array.isArray(videoPaths)
@@ -58,14 +73,14 @@ function normalizeVideoPaths(videoPaths, legacyVideoPath) {
 async function validateInputs(videoPaths, outputDirectory, legacyVideoPath) {
   const normalizedPaths = normalizeVideoPaths(videoPaths, legacyVideoPath);
   if (normalizedPaths.length === 0) {
-    throw new Error("Выберите один или несколько MP4-файлов с записью созвона.");
+    throw new Error("Выберите один или несколько видеофайлов с записью созвона.");
   }
   if (normalizedPaths.length > MAX_VIDEO_FILES) {
-    throw new Error(`За один запуск можно выбрать не более ${MAX_VIDEO_FILES} MP4-файлов.`);
+    throw new Error(`За один запуск можно выбрать не более ${MAX_VIDEO_FILES} видеофайлов.`);
   }
   for (const videoPath of normalizedPaths) {
-    if (!path.isAbsolute(videoPath) || path.extname(videoPath).toLowerCase() !== ".mp4") {
-      throw new Error("Все выбранные записи должны быть MP4-файлами.");
+    if (!path.isAbsolute(videoPath) || !isSupportedVideoPath(videoPath)) {
+      throw new Error(`Поддерживаются форматы ${SUPPORTED_VIDEO_FORMATS_TEXT}.`);
     }
   }
   if (typeof outputDirectory !== "string" || !path.isAbsolute(outputDirectory)) {
@@ -402,6 +417,8 @@ async function runMeetingWorkflow({
 
 module.exports = {
   MAX_VIDEO_FILES,
+  SUPPORTED_VIDEO_EXTENSIONS,
+  isSupportedVideoPath,
   normalizeVideoPaths,
   runMeetingWorkflow,
   validateInputs

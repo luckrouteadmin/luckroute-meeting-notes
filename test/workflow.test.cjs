@@ -5,7 +5,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { runMeetingWorkflow } = require("../src/core/workflow.cjs");
+const {
+  SUPPORTED_VIDEO_EXTENSIONS,
+  isSupportedVideoPath,
+  runMeetingWorkflow,
+  validateInputs
+} = require("../src/core/workflow.cjs");
 
 async function fixture(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-workflow-test-"));
@@ -24,6 +29,30 @@ function fakeSplitAudio() {
     return [chunk];
   };
 }
+
+test("поддерживаются MOV и другие популярные видеоформаты", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-formats-test-"));
+  const outputDirectory = path.join(directory, "result");
+  await fs.mkdir(outputDirectory);
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  const videoPaths = [];
+  for (const extension of SUPPORTED_VIDEO_EXTENSIONS) {
+    const videoPath = path.join(directory, `recording${extension.toUpperCase()}`);
+    await fs.writeFile(videoPath, `fake ${extension}`);
+    videoPaths.push(videoPath);
+    assert.equal(isSupportedVideoPath(videoPath), true);
+  }
+
+  const validatedPaths = await validateInputs(videoPaths, outputDirectory);
+  assert.equal(validatedPaths.length, videoPaths.length);
+  assert.deepEqual(new Set(validatedPaths), new Set(videoPaths));
+  assert.equal(isSupportedVideoPath(path.join(directory, "recording.txt")), false);
+  await assert.rejects(
+    validateInputs([path.join(directory, "recording.txt")], outputDirectory),
+    /MP4, MOV, M4V, MKV, AVI и WebM/
+  );
+});
 
 test("рабочий процесс сохраняет расшифровку и сводку", async (t) => {
   const paths = await fixture(t);
@@ -134,12 +163,12 @@ test("при сбое сводки уже готовая расшифровка 
   assert.match(await fs.readFile(capturedError.transcriptPath, "utf8"), /Важный текст/);
 });
 
-test("несколько MP4 сортируются естественно и делятся на отдельные созвоны", async (t) => {
+test("несколько видео разных форматов сортируются естественно и делятся на отдельные созвоны", async (t) => {
   const paths = await fixture(t);
-  const secondVideo = path.join(path.dirname(paths.videoPath), "План продаж 2.mp4");
+  const secondVideo = path.join(path.dirname(paths.videoPath), "План продаж 2.mov");
   await fs.rename(paths.videoPath, path.join(path.dirname(paths.videoPath), "План продаж 10.mp4"));
   const tenthVideo = path.join(path.dirname(paths.videoPath), "План продаж 10.mp4");
-  await fs.writeFile(secondVideo, "fake mp4 2");
+  await fs.writeFile(secondVideo, "fake mov 2");
   const transcribed = [];
 
   const result = await runMeetingWorkflow({

@@ -54,8 +54,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.2.0") {
-  throw new Error("Версия сборки должна быть 1.2.0.");
+if (packageJson.version !== "1.2.1") {
+  throw new Error("Версия сборки должна быть 1.2.1.");
 }
 
 const mainProcess = fs.readFileSync(path.join(root, "app/main.cjs"), "utf8");
@@ -69,7 +69,17 @@ if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includ
 }
 
 if (!mainProcess.includes("powerSaveBlocker") || !mainProcess.includes("multiSelections")) {
-  throw new Error("Главный процесс должен защищать долгую обработку и поддерживать несколько MP4.");
+  throw new Error("Главный процесс должен защищать долгую обработку и поддерживать несколько видеофайлов.");
+}
+
+const workflow = fs.readFileSync(path.join(root, "src/core/workflow.cjs"), "utf8");
+for (const extension of [".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"]) {
+  if (!workflow.includes(`"${extension}"`)) {
+    throw new Error(`В списке поддерживаемых видеоформатов нет ${extension}.`);
+  }
+}
+if (!mainProcess.includes("SUPPORTED_VIDEO_EXTENSIONS")) {
+  throw new Error("Диалог выбора должен использовать единый список поддерживаемых видеоформатов.");
 }
 
 const prompt = fs.readFileSync(path.join(root, "src/core/prompt.cjs"), "utf8");

@@ -62,13 +62,13 @@ function displayPath(element, value, placeholder) {
 function displayVideos(videoPaths) {
   elements.videoList.replaceChildren();
   if (videoPaths.length === 0) {
-    displayPath(elements.videoPath, null, "MP4-файлы не выбраны");
+    displayPath(elements.videoPath, null, "Видеофайлы не выбраны");
     elements.videoList.hidden = true;
     elements.videoOrderHint.hidden = true;
     return;
   }
   if (videoPaths.length === 1) {
-    displayPath(elements.videoPath, videoPaths[0], "MP4-файл не выбран");
+    displayPath(elements.videoPath, videoPaths[0], "Видеофайл не выбран");
     elements.videoList.hidden = true;
     elements.videoOrderHint.hidden = true;
     return;
