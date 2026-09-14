@@ -2,7 +2,11 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { SUMMARY_INSTRUCTIONS, wrapTranscript } = require("../src/core/prompt.cjs");
+const {
+  SUMMARY_INSTRUCTIONS,
+  getSummaryInstructions,
+  wrapTranscript
+} = require("../src/core/prompt.cjs");
 
 test("шаблон сохраняет согласованную структуру сводки", () => {
   const headings = [
@@ -23,3 +27,15 @@ test("расшифровка явно отделяется от инструкц
   assert.equal(wrapTranscript("текст").endsWith("<transcript>\nтекст\n</transcript>"), true);
 });
 
+test("английский режим использует полный английский шаблон сводки", () => {
+  const instructions = getSummaryInstructions("en");
+  for (const heading of [
+    "EXECUTIVE SUMMARY",
+    "DISCUSSION BY TOPIC",
+    "DECISIONS",
+    "ACTION ITEMS BY OWNER",
+    "OPEN QUESTIONS",
+    "OUTCOME"
+  ]) assert.match(instructions, new RegExp(heading));
+  assert.match(wrapTranscript("hello", "en"), /The transcript is below/);
+});

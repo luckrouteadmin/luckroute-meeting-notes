@@ -1,10 +1,10 @@
 {
   "name": "luckroute-meeting-notes",
-  "version": "1.2.2",
-  "description": "Расшифровка одной или нескольких видеозаписей созвонов и создание подробных сводок в один клик",
+  "version": "1.2.3",
+  "description": "Luckroute Meeting Notes — расшифровка видеозаписей и подробные сводки на русском и английском",
   "private": true,
   "main": "app/main.cjs",
-  "author": "Luckroute",
+  "author": "Luckroute IT department",
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
@@ -23,7 +23,8 @@
   },
   "build": {
     "appId": "com.luckroute.meetingnotes",
-    "productName": "Сводка созвона",
+    "productName": "Luckroute Meeting Notes",
+    "copyright": "Copyright © 2026 Luckroute IT department",
     "asar": true,
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
@@ -49,10 +50,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
+      "multiLanguageInstaller": true,
       "installerLanguages": [
+        "en_US",
         "ru_RU"
       ],
-      "language": "1049",
       "unicode": true
     },
     "mac": {
@@ -71,7 +73,7 @@
       "minimumSystemVersion": "12.0"
     },
     "dmg": {
-      "title": "Сводка созвона ${version}",
+      "title": "Luckroute Meeting Notes ${version}",
       "contents": [
         {
           "x": 140,

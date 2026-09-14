@@ -4,11 +4,12 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { ApiError, CancelledError } = require("./errors.cjs");
 const {
-  EXTRACTION_INSTRUCTIONS,
-  SUMMARY_INSTRUCTIONS,
+  getExtractionInstructions,
+  getSummaryInstructions,
   wrapTranscript
 } = require("./prompt.cjs");
 const { buildBoundaryInput } = require("./meeting-boundaries.cjs");
+const { normalizeLocale, translate } = require("./locale.cjs");
 
 const API_BASE_URL = "https://api.openai.com/v1";
 const TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
@@ -18,7 +19,8 @@ const MEETING_BOUNDARY_MODEL = "gpt-5.6";
 const MAX_DIRECT_SUMMARY_CHARACTERS = 700_000;
 const NOTES_CHUNK_CHARACTERS = 220_000;
 const REQUEST_TIMEOUT_MS = 8 * 60 * 1000;
-const REQUEST_ATTEMPTS = 3;
+const REQUEST_ATTEMPTS = 5;
+const MAX_RETRY_DELAY_MS = 20_000;
 const SPEAKER_VISION_BATCH_SIZE = 10;
 
 const SPEAKER_VISION_INSTRUCTIONS = `Ты анализируешь кадры записи видеосозвона и читаешь только видимые элементы интерфейса Teams, Zoom, Google Meet или похожей программы.
@@ -29,6 +31,15 @@ const SPEAKER_VISION_INSTRUCTIONS = `Ты анализируешь кадры з
 3. Не распознавай человека по лицу, не связывай имя с внешностью, голосом, содержанием речи, порядком плиток или предыдущими кадрами.
 4. Если индикатор не виден, имя обрезано, подпись не читается или есть несколько возможных говорящих, верни пустое имя и confidence=low.
 5. Сохраняй написание видимого имени без исправлений и дополнений.`;
+
+const ENGLISH_SPEAKER_VISION_INSTRUCTIONS = `Analyze frames from a video meeting recording and read only visible interface elements from Teams, Zoom, Google Meet, or a similar app.
+
+For every frame:
+1. Find an unambiguous visual active-speaker indicator: a colored or bright border, highlighted tile, speech or microphone icon, active-speaker label, or dedicated app banner.
+2. Read the small name label belonging specifically to that highlighted participant. The name may be in a tile corner, below the tile, or in an overlay banner.
+3. Never identify a person from their face and never associate a name with appearance, voice, speech content, tile position, or earlier frames.
+4. If the indicator is missing, the name is cropped or unreadable, or several speakers are possible, return an empty name with confidence=low.
+5. Preserve the visible spelling exactly, without corrections or additions.`;
 
 const SPEAKER_OBSERVATIONS_SCHEMA = {
   type: "object",
@@ -89,13 +100,22 @@ const MEETING_BOUNDARY_INSTRUCTIONS = `Определи границы само�
 4. Каждый ID должен войти ровно в один диапазон. Диапазоны должны начинаться с ID 1, идти без пробелов и перекрытий и заканчиваться последним ID.
 5. Дай каждому созвону короткое деловое название по его фактической основной теме. Не добавляй фактов, которых нет в тексте.`;
 
-function sleep(milliseconds, signal) {
+const ENGLISH_MEETING_BOUNDARY_INSTRUCTIONS = `Find the boundaries of separate meetings inside a sequential transcript. Every segment has a continuous ID, source video number, timestamp, and speaker.
+
+Rules:
+1. Split only clearly independent sessions: a new greeting or introduction, a change in participants and context, an ending followed by a new meeting, or an explicit full restart of the conversation.
+2. A topic change within one conversation is not a new meeting. A source-file boundary alone is not a meeting boundary because several files can be parts of one meeting.
+3. If uncertain, return one meeting.
+4. Every ID must belong to exactly one range. Ranges must start with ID 1, be contiguous and non-overlapping, and end with the final ID.
+5. Give every meeting a short business title based on its actual main topic. Do not add facts that are not in the transcript.`;
+
+function sleep(milliseconds, signal, locale = "ru") {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new CancelledError());
+    if (signal?.aborted) return reject(new CancelledError(undefined, locale));
     const onAbort = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      reject(new CancelledError());
+      reject(new CancelledError(undefined, locale));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -124,18 +144,43 @@ function timeoutSignal(parentSignal, timeoutMs) {
   };
 }
 
-function normalizeRequestError(error, { timedOut = false } = {}) {
+function normalizeRequestError(error, { timedOut = false, locale = "ru" } = {}) {
   if (error instanceof ApiError || error instanceof CancelledError) return error;
   if (timedOut) {
-    return new ApiError("Превышено время ожидания ответа от OpenAI.", {
+    return new ApiError(translate(locale, "requestTimeout"), {
       code: "NETWORK_TIMEOUT",
       cause: error
     });
   }
-  return new ApiError("Не удалось установить сетевое соединение с OpenAI.", {
+  return new ApiError(translate(locale, "requestNetworkError"), {
     code: "NETWORK_ERROR",
     cause: error
   });
+}
+
+function isRetryableStatus(status) {
+  return status === 408
+    || status === 409
+    || status === 425
+    || status === 429
+    || (status >= 500 && status <= 599);
+}
+
+function retryDelayMs(response, attempt, randomImpl = Math.random) {
+  const rawRetryAfter = response?.headers?.get?.("retry-after");
+  if (typeof rawRetryAfter === "string" && rawRetryAfter.trim()) {
+    const seconds = Number.parseFloat(rawRetryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(MAX_RETRY_DELAY_MS, Math.round(seconds * 1000));
+    }
+    const date = Date.parse(rawRetryAfter);
+    if (Number.isFinite(date)) {
+      return Math.min(MAX_RETRY_DELAY_MS, Math.max(0, date - Date.now()));
+    }
+  }
+  const base = Math.min(MAX_RETRY_DELAY_MS, 1250 * (2 ** attempt));
+  const jitter = 0.8 + Math.max(0, Math.min(1, Number(randomImpl()) || 0)) * 0.4;
+  return Math.round(base * jitter);
 }
 
 async function parseApiResponse(response) {
@@ -161,13 +206,16 @@ async function requestWithRetry({
   headers = {},
   signal,
   fetchImpl = fetch,
-  onRetry = () => {}
+  onRetry = () => {},
+  maxAttempts = REQUEST_ATTEMPTS,
+  sleepImpl = sleep,
+  randomImpl = Math.random,
+  locale = "ru"
 }) {
-  const retryableStatuses = new Set([408, 409, 429, 500, 502, 503, 504]);
   let lastError;
 
-  for (let attempt = 0; attempt < REQUEST_ATTEMPTS; attempt += 1) {
-    if (signal?.aborted) throw new CancelledError();
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (signal?.aborted) throw new CancelledError(undefined, locale);
     const timed = timeoutSignal(signal, REQUEST_TIMEOUT_MS);
     try {
       const response = await fetchImpl(url, {
@@ -176,33 +224,35 @@ async function requestWithRetry({
         body: bodyFactory(),
         signal: timed.signal
       });
-      if (retryableStatuses.has(response.status) && attempt < REQUEST_ATTEMPTS - 1) {
-        const retryAfter = Number(response.headers.get("retry-after"));
-        const delayMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : 1200 * 2 ** attempt;
+      if (isRetryableStatus(response.status) && attempt < maxAttempts - 1) {
+        const delayMs = retryDelayMs(response, attempt, randomImpl);
         await response.text();
         timed.cleanup();
         onRetry({
           nextAttempt: attempt + 2,
-          maxAttempts: REQUEST_ATTEMPTS,
+          maxAttempts,
           delayMs,
           reason: `HTTP ${response.status}`
         });
-        await sleep(delayMs, signal);
+        await sleepImpl(delayMs, signal, locale);
         continue;
       }
       return await parseApiResponse(response);
     } catch (error) {
-      if (signal?.aborted) throw new CancelledError();
-      lastError = normalizeRequestError(error, { timedOut: timed.didTimeOut() });
-      if (error instanceof ApiError || attempt === REQUEST_ATTEMPTS - 1) throw lastError;
-      const delayMs = 1200 * 2 ** attempt;
+      if (signal?.aborted) throw new CancelledError(undefined, locale);
+      lastError = normalizeRequestError(error, {
+        timedOut: timed.didTimeOut(),
+        locale
+      });
+      if (error instanceof ApiError || attempt === maxAttempts - 1) throw lastError;
+      const delayMs = retryDelayMs(null, attempt, randomImpl);
       onRetry({
         nextAttempt: attempt + 2,
-        maxAttempts: REQUEST_ATTEMPTS,
+        maxAttempts,
         delayMs,
         reason: lastError.code
       });
-      await sleep(delayMs, signal);
+      await sleepImpl(delayMs, signal, locale);
     } finally {
       timed.cleanup();
     }
@@ -210,10 +260,21 @@ async function requestWithRetry({
   throw lastError;
 }
 
-async function transcribeAudioFile({ filePath, apiKey, signal, fetchImpl = fetch, onRetry }) {
+async function transcribeAudioFile({
+  filePath,
+  apiKey,
+  signal,
+  fetchImpl = fetch,
+  onRetry,
+  locale = "ru"
+}) {
+  const normalizedLocale = normalizeLocale(locale);
   const bytes = await fs.readFile(filePath);
   if (bytes.length > 25 * 1024 * 1024) {
-    throw new ApiError("Фрагмент превышает 25 МБ.", { status: 413, code: "FILE_TOO_LARGE" });
+    throw new ApiError(translate(normalizedLocale, "audioChunkTooLarge"), {
+      status: 413,
+      code: "FILE_TOO_LARGE"
+    });
   }
 
   return requestWithRetry({
@@ -222,19 +283,20 @@ async function transcribeAudioFile({ filePath, apiKey, signal, fetchImpl = fetch
     signal,
     fetchImpl,
     onRetry,
+    locale: normalizedLocale,
     bodyFactory: () => {
       const form = new FormData();
       form.append("file", new Blob([bytes], { type: "audio/mpeg" }), path.basename(filePath));
       form.append("model", TRANSCRIPTION_MODEL);
       form.append("response_format", "diarized_json");
       form.append("chunking_strategy", "auto");
-      form.append("language", "ru");
+      form.append("language", normalizedLocale);
       return form;
     }
   });
 }
 
-function extractResponseText(payload) {
+function extractResponseText(payload, locale = "ru") {
   if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
     return payload.output_text.trim();
   }
@@ -248,7 +310,9 @@ function extractResponseText(payload) {
     }
   }
   const result = pieces.join("\n").trim();
-  if (!result) throw new ApiError("Модель вернула пустой текст.", { code: "EMPTY_RESPONSE" });
+  if (!result) {
+    throw new ApiError(translate(locale, "emptyResponse"), { code: "EMPTY_RESPONSE" });
+  }
   return result;
 }
 
@@ -262,7 +326,8 @@ async function createTextResponse({
   model = SUMMARY_MODEL,
   reasoningEffort = "low",
   verbosity = "high",
-  onRetry
+  onRetry,
+  locale = "ru"
 }) {
   const payload = await requestWithRetry({
     url: `${API_BASE_URL}/responses`,
@@ -270,6 +335,7 @@ async function createTextResponse({
     signal,
     fetchImpl,
     onRetry,
+    locale,
     headers: { "Content-Type": "application/json" },
     bodyFactory: () => JSON.stringify({
       model,
@@ -284,28 +350,35 @@ async function createTextResponse({
       store: false
     })
   });
-  return extractResponseText(payload);
+  return extractResponseText(payload, locale);
 }
 
-function parseSpeakerObservations(payload) {
+function parseSpeakerObservations(payload, locale = "ru") {
   let parsed;
   try {
-    parsed = JSON.parse(extractResponseText(payload));
+    parsed = JSON.parse(extractResponseText(payload, locale));
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("Не удалось прочитать результат анализа кадров.", {
+    throw new ApiError(translate(locale, "invalidVisionResponse"), {
       code: "INVALID_VISION_RESPONSE"
     });
   }
   if (!Array.isArray(parsed?.observations)) {
-    throw new ApiError("Модель не вернула наблюдения по кадрам.", {
+    throw new ApiError(translate(locale, "missingVisionObservations"), {
       code: "INVALID_VISION_RESPONSE"
     });
   }
   return parsed.observations;
 }
 
-async function identifySpeakerFrameBatch({ samples, apiKey, signal, fetchImpl, onRetry }) {
+async function identifySpeakerFrameBatch({
+  samples,
+  apiKey,
+  signal,
+  fetchImpl,
+  onRetry,
+  locale = "ru"
+}) {
   if (!Array.isArray(samples) || samples.length === 0) return [];
   const images = await Promise.all(samples.map(async (sample) => ({
     ...sample,
@@ -313,7 +386,7 @@ async function identifySpeakerFrameBatch({ samples, apiKey, signal, fetchImpl, o
   })));
   const content = [{
     type: "input_text",
-    text: "Далее идут пары из служебной метки и соответствующего кадра. Верни ровно одно наблюдение для каждого sample_id. Метка audio_speaker нужна только для сопоставления результата и не является подсказкой об имени."
+    text: translate(locale, "speakerFrameIntro")
   }];
   for (const image of images) {
     content.push({
@@ -333,10 +406,13 @@ async function identifySpeakerFrameBatch({ samples, apiKey, signal, fetchImpl, o
     signal,
     fetchImpl,
     onRetry,
+    locale,
     headers: { "Content-Type": "application/json" },
     bodyFactory: () => JSON.stringify({
       model: SPEAKER_VISION_MODEL,
-      instructions: SPEAKER_VISION_INSTRUCTIONS,
+      instructions: normalizeLocale(locale) === "en"
+        ? ENGLISH_SPEAKER_VISION_INSTRUCTIONS
+        : SPEAKER_VISION_INSTRUCTIONS,
       input: [{ role: "user", content }],
       reasoning: { effort: "low" },
       text: {
@@ -352,7 +428,7 @@ async function identifySpeakerFrameBatch({ samples, apiKey, signal, fetchImpl, o
       store: false
     })
   });
-  return parseSpeakerObservations(payload);
+  return parseSpeakerObservations(payload, locale);
 }
 
 async function identifySpeakersFromFrames({
@@ -361,7 +437,8 @@ async function identifySpeakersFromFrames({
   signal,
   fetchImpl = fetch,
   onProgress = () => {},
-  onRetry
+  onRetry,
+  locale = "ru"
 }) {
   if (!Array.isArray(samples) || samples.length === 0) return [];
   const observations = [];
@@ -372,51 +449,67 @@ async function identifySpeakersFromFrames({
     onProgress({
       completedBatches: batchIndex,
       totalBatches,
-      message: `Читаю имена на кадрах: пакет ${batchIndex + 1} из ${totalBatches}…`
+      message: translate(locale, "readFrames", {
+        current: batchIndex + 1,
+        total: totalBatches
+      })
     });
     observations.push(...await identifySpeakerFrameBatch({
       samples: batch,
       apiKey,
       signal,
       fetchImpl,
-      onRetry
+      onRetry,
+      locale
     }));
   }
   return observations;
 }
 
-function parseMeetingBoundaries(payload) {
+function parseMeetingBoundaries(payload, locale = "ru") {
   let parsed;
   try {
-    parsed = JSON.parse(extractResponseText(payload));
+    parsed = JSON.parse(extractResponseText(payload, locale));
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("Не удалось прочитать границы созвонов.", {
+    throw new ApiError(translate(locale, "invalidBoundaryResponse"), {
       code: "INVALID_BOUNDARY_RESPONSE"
     });
   }
   if (!Array.isArray(parsed?.meetings)) {
-    throw new ApiError("Модель не вернула границы созвонов.", {
+    throw new ApiError(translate(locale, "missingBoundaryMeetings"), {
       code: "INVALID_BOUNDARY_RESPONSE"
     });
   }
   return parsed.meetings;
 }
 
-async function detectMeetingBoundaries({ utterances, apiKey, signal, fetchImpl = fetch, onRetry }) {
+async function detectMeetingBoundaries({
+  utterances,
+  apiKey,
+  signal,
+  fetchImpl = fetch,
+  onRetry,
+  locale = "ru"
+}) {
   if (!Array.isArray(utterances) || utterances.length === 0) return [];
-  const indexedTranscript = buildBoundaryInput(utterances);
+  const indexedTranscript = buildBoundaryInput(utterances, locale);
   const payload = await requestWithRetry({
     url: `${API_BASE_URL}/responses`,
     apiKey,
     signal,
     fetchImpl,
     onRetry,
+    locale,
     headers: { "Content-Type": "application/json" },
     bodyFactory: () => JSON.stringify({
       model: MEETING_BOUNDARY_MODEL,
-      instructions: MEETING_BOUNDARY_INSTRUCTIONS,
-      input: `Последний ID: ${utterances.at(-1).id}\n\n<segments>\n${indexedTranscript}\n</segments>`,
+      instructions: normalizeLocale(locale) === "en"
+        ? ENGLISH_MEETING_BOUNDARY_INSTRUCTIONS
+        : MEETING_BOUNDARY_INSTRUCTIONS,
+      input: `${translate(locale, "boundaryInputIntro")}\n${translate(locale, "boundaryLastId", {
+        id: utterances.at(-1).id
+      })}\n\n<segments>\n${indexedTranscript}\n</segments>`,
       reasoning: { effort: "low" },
       text: {
         format: {
@@ -431,7 +524,7 @@ async function detectMeetingBoundaries({ utterances, apiKey, signal, fetchImpl =
       store: false
     })
   });
-  return parseMeetingBoundaries(payload);
+  return parseMeetingBoundaries(payload, locale);
 }
 
 function splitLongText(text, maximumCharacters = NOTES_CHUNK_CHARACTERS) {
@@ -469,31 +562,40 @@ async function summarizeTranscript({
   onProgress = () => {},
   progressStart = 76,
   progressEnd = 97,
-  label = "созвона"
+  label,
+  locale = "ru"
 }) {
+  const normalizedLocale = normalizeLocale(locale);
+  const summaryLabel = label || translate(normalizedLocale, "summaryLabelOne");
   let currentPercent = progressStart;
   const emit = (fraction, message) => {
     currentPercent = Math.round(progressStart + Math.max(0, Math.min(1, fraction)) * (progressEnd - progressStart));
     onProgress({ stage: "summary", percent: currentPercent, message });
   };
-  const onRetry = ({ nextAttempt, maxAttempts }) => {
+  const onRetry = ({ nextAttempt, maxAttempts, delayMs }) => {
     onProgress({
       stage: "network-retry",
       percent: currentPercent,
-      message: `Связь прервалась — повторяю запрос ${nextAttempt} из ${maxAttempts}…`
+      message: translate(normalizedLocale, "networkRetry", {
+        subject: translate(normalizedLocale, "retrySummary"),
+        next: nextAttempt,
+        max: maxAttempts,
+        seconds: Math.max(1, Math.ceil((delayMs || 0) / 1000))
+      })
     });
   };
 
   if (transcript.length <= MAX_DIRECT_SUMMARY_CHARACTERS) {
-    emit(0.12, `Формирую подробную сводку ${label}…`);
+    emit(0.12, translate(normalizedLocale, "summaryDetailed", { label: summaryLabel }));
     return createTextResponse({
       apiKey,
-      instructions: SUMMARY_INSTRUCTIONS,
-      input: wrapTranscript(transcript),
+      instructions: getSummaryInstructions(normalizedLocale),
+      input: wrapTranscript(transcript, normalizedLocale),
       maxOutputTokens: 24_000,
       signal,
       fetchImpl,
-      onRetry
+      onRetry,
+      locale: normalizedLocale
     });
   }
 
@@ -502,28 +604,35 @@ async function summarizeTranscript({
   for (let index = 0; index < chunks.length; index += 1) {
     emit(
       ((index + 1) / (chunks.length + 1)) * 0.82,
-      `Анализирую длинную запись: часть ${index + 1} из ${chunks.length}…`
+      translate(normalizedLocale, "summaryLongPart", {
+        current: index + 1,
+        total: chunks.length
+      })
     );
     notes.push(await createTextResponse({
       apiKey,
-      instructions: EXTRACTION_INSTRUCTIONS,
-      input: wrapTranscript(chunks[index]),
+      instructions: getExtractionInstructions(normalizedLocale),
+      input: wrapTranscript(chunks[index], normalizedLocale),
       maxOutputTokens: 16_000,
       signal,
       fetchImpl,
-      onRetry
+      onRetry,
+      locale: normalizedLocale
     }));
   }
 
-  emit(0.9, `Собираю итоговую сводку ${label}…`);
+  emit(0.9, translate(normalizedLocale, "summaryFinal", { label: summaryLabel }));
   return createTextResponse({
     apiKey,
-    instructions: SUMMARY_INSTRUCTIONS,
-    input: `Ниже фактические заметки по последовательным частям одной записи.\n\n${notes.map((note, index) => `ЧАСТЬ ${index + 1}\n${note}`).join("\n\n")}`,
+    instructions: getSummaryInstructions(normalizedLocale),
+    input: `${translate(normalizedLocale, "longNotesIntro")}\n\n${notes.map((note, index) => (
+      `${translate(normalizedLocale, "longNotesPart", { number: index + 1 })}\n${note}`
+    )).join("\n\n")}`,
     maxOutputTokens: 24_000,
     signal,
     fetchImpl,
-    onRetry
+    onRetry,
+    locale: normalizedLocale
   });
 }
 
@@ -535,6 +644,7 @@ module.exports = {
   NOTES_CHUNK_CHARACTERS,
   REQUEST_ATTEMPTS,
   REQUEST_TIMEOUT_MS,
+  MAX_RETRY_DELAY_MS,
   SPEAKER_OBSERVATIONS_SCHEMA,
   SPEAKER_VISION_BATCH_SIZE,
   SPEAKER_VISION_MODEL,
@@ -545,10 +655,12 @@ module.exports = {
   extractResponseText,
   identifySpeakerFrameBatch,
   identifySpeakersFromFrames,
+  isRetryableStatus,
   normalizeRequestError,
   parseMeetingBoundaries,
   parseSpeakerObservations,
   requestWithRetry,
+  retryDelayMs,
   splitLongText,
   summarizeTranscript,
   transcribeAudioFile

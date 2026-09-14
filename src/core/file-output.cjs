@@ -2,24 +2,27 @@
 
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const { translate } = require("./locale.cjs");
 
-function sanitizeStem(value, maximumLength = 100) {
-  const cleaned = String(value || "созвон")
+function sanitizeStem(value, maximumLength = 100, fallback = "созвон") {
+  const cleaned = String(value || fallback)
     .replace(/[<>:\"/\\|?*\u0000-\u001F]/g, " ")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")
     .trim();
-  return (cleaned || "созвон")
+  return (cleaned || fallback)
     .slice(0, Math.max(12, maximumLength))
     .replace(/[. ]+$/g, "");
 }
 
-function deriveOutputStem(videoPaths) {
+function deriveOutputStem(videoPaths, locale = "ru") {
+  const fallback = translate(locale, "defaultStem");
   const stems = videoPaths.map((filePath) => sanitizeStem(
     path.basename(filePath, path.extname(filePath)),
-    64
+    64,
+    fallback
   ));
-  if (stems.length <= 1) return stems[0] || "созвон";
+  if (stems.length <= 1) return stems[0] || fallback;
 
   let common = stems[0];
   for (const stem of stems.slice(1)) {
@@ -33,7 +36,7 @@ function deriveOutputStem(videoPaths) {
   }
   common = common.replace(/[\s_.–—-]+$/g, "").trim();
   const base = common.length >= 4 ? common : stems[0];
-  return sanitizeStem(`${base} — объединено`, 82);
+  return sanitizeStem(translate(locale, "combinedStem", { stem: base }), 82, fallback);
 }
 
 async function exists(filePath) {
@@ -46,28 +49,41 @@ async function exists(filePath) {
   }
 }
 
-async function chooseOutputPaths(outputDirectory, originalStem) {
-  const stem = sanitizeStem(originalStem);
+async function chooseOutputPaths(outputDirectory, originalStem, locale = "ru") {
+  const fallback = translate(locale, "defaultStem");
+  const stem = sanitizeStem(originalStem, 100, fallback);
+  const transcriptSuffix = translate(locale, "transcriptSuffix");
+  const summarySuffix = translate(locale, "summarySuffix");
   for (let suffix = 1; suffix < 10_000; suffix += 1) {
     const decorated = suffix === 1 ? stem : `${stem} (${suffix})`;
-    const transcriptPath = path.join(outputDirectory, `${decorated} — расшифровка.txt`);
-    const summaryPath = path.join(outputDirectory, `${decorated} — сводка.txt`);
+    const transcriptPath = path.join(outputDirectory, `${decorated} — ${transcriptSuffix}.txt`);
+    const summaryPath = path.join(outputDirectory, `${decorated} — ${summarySuffix}.txt`);
     if (!(await exists(transcriptPath)) && !(await exists(summaryPath))) {
       return { transcriptPath, summaryPath };
     }
   }
-  throw new Error("Не удалось подобрать свободное имя для файлов результата.");
+  throw new Error(translate(locale, "outputNameFailure"));
 }
 
-async function chooseMeetingOutputPaths(outputDirectory, baseStem, meetings) {
+async function chooseMeetingOutputPaths(outputDirectory, baseStem, meetings, locale = "ru") {
   const multiple = meetings.length > 1;
   const outputPaths = [];
+  const fallback = translate(locale, "defaultStem");
   for (let index = 0; index < meetings.length; index += 1) {
-    const title = sanitizeStem(meetings[index]?.title || `Созвон ${index + 1}`, 42);
+    const number = String(index + 1).padStart(2, "0");
+    const title = sanitizeStem(
+      meetings[index]?.title || translate(locale, "defaultMeetingNumber", { number: index + 1 }),
+      42,
+      fallback
+    );
     const stem = multiple
-      ? `${sanitizeStem(baseStem, 52)} — созвон ${String(index + 1).padStart(2, "0")} — ${title}`
+      ? translate(locale, "meetingStem", {
+        stem: sanitizeStem(baseStem, 52, fallback),
+        number,
+        title
+      })
       : baseStem;
-    outputPaths.push(await chooseOutputPaths(outputDirectory, stem));
+    outputPaths.push(await chooseOutputPaths(outputDirectory, stem, locale));
   }
   return outputPaths;
 }
@@ -82,17 +98,22 @@ function formatSummaryFile(summary, {
   sourceName,
   sourceNames,
   title,
-  createdAt = new Date()
+  createdAt = new Date(),
+  locale = "ru"
 }) {
   const names = (Array.isArray(sourceNames) ? sourceNames : [sourceName]).filter(Boolean);
   const sourceLines = names.length <= 1
-    ? [`Исходный файл: ${names[0] || "не указан"}`]
-    : ["Исходные файлы (в порядке обработки):", ...names.map((name, index) => `${index + 1}. ${name}`)];
+    ? [translate(locale, "sourceFile", {
+      name: names[0] || translate(locale, "notSpecified")
+    })]
+    : [translate(locale, "sourceFiles"), ...names.map((name, index) => `${index + 1}. ${name}`)];
   return [
-    "СВОДКА СОЗВОНА",
-    ...(title ? [`Название: ${title}`] : []),
+    translate(locale, "summaryTitle"),
+    ...(title ? [translate(locale, "titleLabel", { title })] : []),
     ...sourceLines,
-    `Создано: ${createdAt.toLocaleString("ru-RU")}`,
+    translate(locale, "createdLabel", {
+      date: createdAt.toLocaleString(translate(locale, "dateLocale"))
+    }),
     "",
     summary.trim(),
     ""

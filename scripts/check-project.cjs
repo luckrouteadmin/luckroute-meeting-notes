@@ -18,6 +18,7 @@ const requiredFiles = [
   "src/core/speaker-identity.cjs",
   "src/core/video.cjs",
   "src/core/prompt.cjs",
+  "src/core/locale.cjs",
   "scripts/mac-adhoc-sign.cjs",
   "build/entitlements.mac.plist",
   "build/icon.png",
@@ -60,8 +61,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.2.2") {
-  throw new Error("Версия сборки должна быть 1.2.2.");
+if (packageJson.version !== "1.2.3") {
+  throw new Error("Версия сборки должна быть 1.2.3.");
 }
 
 const lockJson = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
@@ -100,6 +101,13 @@ const interfaceHtml = fs.readFileSync(path.join(root, "src/ui/index.html"), "utf
 if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("splitMeetingsCheckbox")) {
   throw new Error("В интерфейсе должны быть настройки определения имён и разделения созвонов.");
 }
+if (!interfaceHtml.includes("languageSwitch") || !interfaceHtml.includes("data-i18n")) {
+  throw new Error("Интерфейс должен поддерживать переключение русского и английского языков.");
+}
+
+if (packageJson.author !== "Luckroute IT department") {
+  throw new Error("Разработчиком должен быть указан Luckroute IT department.");
+}
 
 if (!mainProcess.includes("powerSaveBlocker") || !mainProcess.includes("multiSelections")) {
   throw new Error("Главный процесс должен защищать долгую обработку и поддерживать несколько видеофайлов.");
@@ -113,6 +121,11 @@ for (const extension of [".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"]) {
 }
 if (!mainProcess.includes("SUPPORTED_VIDEO_EXTENSIONS")) {
   throw new Error("Диалог выбора должен использовать единый список поддерживаемых видеоформатов.");
+}
+
+const openAiApi = fs.readFileSync(path.join(root, "src/core/openai-api.cjs"), "utf8");
+if (!openAiApi.includes("status >= 500") || !openAiApi.includes("REQUEST_ATTEMPTS = 5")) {
+  throw new Error("Сетевые запросы должны повторять все ошибки HTTP 5xx не менее пяти раз.");
 }
 
 const prompt = fs.readFileSync(path.join(root, "src/core/prompt.cjs"), "utf8");
