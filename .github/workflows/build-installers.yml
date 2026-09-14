@@ -1,31 +1,85 @@
-name: Build installers
+name: Build and publish installers
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "main"
+    inputs:
+      version:
+        description: "Версия из package.json без префикса v (например, 1.2.2)"
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
 jobs:
-  windows:
-    name: Windows x64
-    runs-on: windows-latest
+  preflight:
+    name: Verify release request
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: Install dependencies with retry
+          cache: npm
+      - name: Verify version and uniqueness
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "package.json contains an invalid release version: $version" >&2
+            exit 1
+          fi
+          if [[ "$REQUESTED_VERSION" != "$version" ]]; then
+            echo "Requested version $REQUESTED_VERSION does not match package.json version $version" >&2
+            exit 1
+          fi
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists; released versions are never overwritten" >&2
+            exit 1
+          fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; released versions are never overwritten" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies with retry
         shell: pwsh
         run: |
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            npm install --no-audit --no-fund
+            npm ci --no-audit --no-fund
             if ($LASTEXITCODE -eq 0) { exit 0 }
             Write-Host "Install attempt $attempt failed; retrying..."
             Start-Sleep -Seconds (10 * $attempt)
@@ -43,7 +97,7 @@ jobs:
             Start-Sleep -Seconds (10 * $attempt)
           }
           exit 1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Meeting-Notes-Windows-x64
           path: dist/*.exe
@@ -52,6 +106,7 @@ jobs:
 
   mac:
     name: macOS ${{ matrix.name }}
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
@@ -62,15 +117,18 @@ jobs:
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - name: Install dependencies with retry
+          cache: npm
+      - name: Install locked dependencies with retry
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            if npm install --no-audit --no-fund; then exit 0; fi
+            if npm ci --no-audit --no-fund; then exit 0; fi
             echo "Install attempt $attempt failed; retrying..."
             sleep $((10 * attempt))
           done
@@ -94,7 +152,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
           codesign -dv --verbose=4 "$app_path" 2>&1 | grep -q 'Signature=adhoc'
           codesign -d --entitlements :- "$app_path" 2>&1 | grep -q 'com.apple.security.cs.disable-library-validation'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Meeting-Notes-macOS-${{ matrix.name }}
           path: dist/*.dmg
@@ -102,25 +160,41 @@ jobs:
           retention-days: 30
 
   package-release:
-    name: Package release files
-    needs: [windows, mac]
+    name: Package and attest release
+    needs: [preflight, windows, mac]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: installers
           merge-multiple: true
-      - name: Create combined and source archives
-        id: package
+      - name: Verify and package release files
         shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          version="$(node -p "require('./package.json').version")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          shopt -s nullglob
+          exe_files=(installers/*.exe)
+          dmg_files=(installers/*.dmg)
+          if [[ ${#exe_files[@]} -ne 1 || ${#dmg_files[@]} -ne 2 ]]; then
+            echo "Expected exactly one EXE and two DMG installers" >&2
+            find installers -maxdepth 2 -type f -print >&2
+            exit 1
+          fi
+
           mkdir -p bundle release
-          cp installers/*.exe installers/*.dmg bundle/
+          cp -- "${exe_files[@]}" "${dmg_files[@]}" bundle/
+          cp -- "${exe_files[@]}" "${dmg_files[@]}" release/
           printf '%s\n' \
-            "Сводка созвона $version" \
+            "Сводка созвона $VERSION" \
             '' \
             'Windows: запустите EXE и следуйте обычному мастеру установки.' \
             'macOS Apple Silicon: используйте DMG arm64.' \
@@ -128,44 +202,70 @@ jobs:
             '' \
             'Поддерживаемые видеоформаты: MP4, MOV, M4V, MKV, AVI и WebM.' \
             'Также доступны: несколько видео за один запуск, автоматическое разделение разных созвонов, определение имён, подробные сводки и восстановление после сетевого сбоя.' \
+            'Целостность файлов можно проверить по SHA256SUMS.txt в релизе.' \
             > bundle/README.txt
-          (cd bundle && zip -r "../release/Meeting-Notes-$version-Windows-and-macOS.zip" .)
-          git archive --format=zip --output="release/Meeting-Notes-$version-source.zip" HEAD
-      - uses: actions/upload-artifact@v4
+          (cd bundle && zip -r "../release/Meeting-Notes-$VERSION-Windows-and-macOS.zip" .)
+          git archive --format=zip --output="release/Meeting-Notes-$VERSION-source.zip" HEAD
+          (cd release && sha256sum -- *.exe *.dmg *.zip > SHA256SUMS.txt)
+          (cd release && sha256sum -c SHA256SUMS.txt)
+      - name: Create GitHub artifact attestations
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          name: Meeting-Notes-${{ steps.package.outputs.version }}-all
-          path: release/Meeting-Notes-${{ steps.package.outputs.version }}-Windows-and-macOS.zip
-          if-no-files-found: error
-          retention-days: 30
-      - uses: actions/upload-artifact@v4
+          subject-path: release/*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Meeting-Notes-${{ steps.package.outputs.version }}-source
-          path: release/Meeting-Notes-${{ steps.package.outputs.version }}-source.zip
+          name: Meeting-Notes-${{ needs.preflight.outputs.version }}-release-assets
+          path: release/*
           if-no-files-found: error
           retention-days: 30
 
   publish-release:
-    name: Publish release
-    needs: [windows, mac, package-release]
+    name: Publish immutable release
+    needs: [preflight, package-release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: release-files
-          merge-multiple: true
-      - name: Publish permanent GitHub release
+          name: Meeting-Notes-${{ needs.preflight.outputs.version }}-release-assets
+          path: release
+      - name: Verify checksums
+        shell: bash
+        run: cd release && sha256sum -c SHA256SUMS.txt
+      - name: Create and publish a new release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          version="$(node -p "require('./package.json').version")"
-          tag="v$version"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" release-files/* --clobber
-          else
-            gh release create "$tag" release-files/* \
-              --target "$GITHUB_SHA" \
-              --title "Сводка созвона $tag" \
-              --notes 'Добавлена поддержка MOV, M4V, MKV, AVI и WebM наряду с MP4. Сохранены несколько видео за один запуск, автоматическое разделение разных созвонов, определение имён, подробные сводки и восстановление после сетевого сбоя.'
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; released files will not be overwritten" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; released files will not be overwritten" >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Сводка созвона $TAG" \
+            --notes 'Защищённый выпуск: установщики собраны из зафиксированных зависимостей, проверены на Windows и macOS, снабжены SHA-256 и GitHub artifact attestations. Возможности приложения соответствуют версии 1.2.1.'
+
+          expected_count="$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          actual_count="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"
+          if [[ "$actual_count" != "$expected_count" ]]; then
+            echo "Draft release has $actual_count assets, expected $expected_count; leaving it unpublished" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+          immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.immutable')"
+          if [[ "$immutable" != "true" ]]; then
+            echo "Release was published, but repository release immutability is not enabled" >&2
+            exit 1
           fi
