@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия из package.json без префикса v (например, 1.2.2)"
+        description: "Версия из package.json без префикса v (например, 1.2.3)"
         required: true
         type: string
 
@@ -194,15 +194,19 @@ jobs:
           cp -- "${exe_files[@]}" "${dmg_files[@]}" bundle/
           cp -- "${exe_files[@]}" "${dmg_files[@]}" release/
           printf '%s\n' \
-            "Сводка созвона $VERSION" \
+            "Luckroute Meeting Notes $VERSION / Сводка созвона $VERSION" \
             '' \
             'Windows: запустите EXE и следуйте обычному мастеру установки.' \
+            'Windows: run the EXE and follow the standard installation wizard.' \
             'macOS Apple Silicon: используйте DMG arm64.' \
             'macOS Intel: используйте DMG x64.' \
             '' \
             'Поддерживаемые видеоформаты: MP4, MOV, M4V, MKV, AVI и WebM.' \
-            'Также доступны: несколько видео за один запуск, автоматическое разделение разных созвонов, определение имён, подробные сводки и восстановление после сетевого сбоя.' \
+            'Supported video formats: MP4, MOV, M4V, MKV, AVI, and WebM.' \
+            'Доступны RU/EN, несколько видео за один запуск, разделение созвонов, определение имён, подробные сводки и восстановление после временных ошибок OpenAI.' \
+            'RU/EN, multiple videos, meeting separation, speaker names, detailed summaries, and recovery from temporary OpenAI errors are supported.' \
             'Целостность файлов можно проверить по SHA256SUMS.txt в релизе.' \
+            'Developer / Разработчик: Luckroute IT department.' \
             > bundle/README.txt
           (cd bundle && zip -r "../release/Meeting-Notes-$VERSION-Windows-and-macOS.zip" .)
           git archive --format=zip --output="release/Meeting-Notes-$VERSION-source.zip" HEAD
@@ -253,8 +257,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --draft \
-            --title "Сводка созвона $TAG" \
-            --notes 'Защищённый выпуск: установщики собраны из зафиксированных зависимостей, проверены на Windows и macOS, снабжены SHA-256 и GitHub artifact attestations. Возможности приложения соответствуют версии 1.2.1.'
+            --title "Luckroute Meeting Notes $TAG" \
+            --notes 'Версия 1.2.3: исправлено завершение обработки при временных ошибках OpenAI, включая HTTP 520; добавлены до пяти повторных попыток, новый фирменный интерфейс Luckroute и полное переключение RU/EN для интерфейса, расшифровки, сводки и выходных файлов. Разработчик: Luckroute IT department. Установщики собраны из зафиксированных зависимостей, проверены на Windows и macOS, снабжены SHA-256 и GitHub artifact attestations.'
 
           expected_count="$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')"
           actual_count="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"

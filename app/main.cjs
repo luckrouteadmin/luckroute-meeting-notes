@@ -18,6 +18,7 @@ const {
   SUPPORTED_VIDEO_EXTENSIONS
 } = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
+const { normalizeLocale, translate } = require("../src/core/locale.cjs");
 
 const SETTINGS_FILE = "settings.json";
 const LOG_FILE = "meeting-notes.log";
@@ -27,15 +28,15 @@ const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "ba
 let mainWindow = null;
 let activeJob = null;
 
-function createWindow() {
+function createWindow(locale = "ru") {
   mainWindow = new BrowserWindow({
-    width: 820,
-    height: 860,
-    minWidth: 700,
-    minHeight: 740,
+    width: 920,
+    height: 900,
+    minWidth: 760,
+    minHeight: 760,
     show: false,
-    title: "Сводка созвона",
-    backgroundColor: "#f5f3ee",
+    title: translate(locale, "appTitle"),
+    backgroundColor: "#11170f",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -117,6 +118,20 @@ async function writeSettings(settings) {
   await fs.rename(temporary, destination);
 }
 
+async function getPreferredLocale() {
+  const settings = await readSettings();
+  return normalizeLocale(settings.locale || app.getLocale());
+}
+
+async function saveLocale(value) {
+  const locale = normalizeLocale(value);
+  const settings = await readSettings();
+  settings.locale = locale;
+  await writeSettings(settings);
+  mainWindow?.setTitle(translate(locale, "appTitle"));
+  return locale;
+}
+
 async function getApiKey() {
   const settings = await readSettings();
   if (!settings.apiKey) return null;
@@ -127,13 +142,13 @@ async function getApiKey() {
   }
 }
 
-async function saveApiKey(value) {
+async function saveApiKey(value, locale = "ru") {
   const apiKey = typeof value === "string" ? value.trim() : "";
   if (apiKey.length < 20) {
-    throw new Error("Ключ OpenAI выглядит слишком коротким.");
+    throw new Error(translate(locale, "apiKeyTooShort"));
   }
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("Системное защищённое хранилище недоступно.");
+    throw new Error(translate(locale, "secureStorageUnavailable"));
   }
   const settings = await readSettings();
   settings.apiKey = safeStorage.encryptString(apiKey).toString("base64");
@@ -160,38 +175,51 @@ function sortVideoPaths(filePaths) {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle("app:get-state", async () => ({
-    version: app.getVersion(),
-    hasApiKey: Boolean(await getApiKey()),
-    platform: process.platform
-  }));
+  ipcMain.handle("app:get-state", async () => {
+    const locale = await getPreferredLocale();
+    return {
+      version: app.getVersion(),
+      hasApiKey: Boolean(await getApiKey()),
+      platform: process.platform,
+      locale,
+      developer: "Luckroute IT department"
+    };
+  });
 
   ipcMain.handle("dialog:choose-video", async () => {
+    const locale = await getPreferredLocale();
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Выберите одну или несколько записей созвона",
+      title: translate(locale, "dialogChooseVideo"),
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "Видео", extensions: VIDEO_DIALOG_EXTENSIONS },
-        { name: "Все файлы", extensions: ["*"] }
+        { name: translate(locale, "videoFilter"), extensions: VIDEO_DIALOG_EXTENSIONS },
+        { name: translate(locale, "allFilesFilter"), extensions: ["*"] }
       ]
     });
     return result.canceled ? null : sortVideoPaths(result.filePaths);
   });
 
   ipcMain.handle("dialog:choose-output", async () => {
+    const locale = await getPreferredLocale();
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Куда сохранить расшифровку и сводку",
+      title: translate(locale, "dialogChooseOutput"),
       properties: ["openDirectory", "createDirectory"]
     });
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle("settings:save-api-key", async (_event, apiKey) => {
+  ipcMain.handle("settings:set-locale", async (_event, locale) => ({
+    ok: true,
+    locale: await saveLocale(locale)
+  }));
+
+  ipcMain.handle("settings:save-api-key", async (_event, apiKey, localeValue) => {
+    const locale = normalizeLocale(localeValue || await getPreferredLocale());
     try {
-      await saveApiKey(apiKey);
+      await saveApiKey(apiKey, locale);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: toUserError(error).message };
+      return { ok: false, error: toUserError(error, locale).message };
     }
   });
 
@@ -201,13 +229,18 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle("workflow:start", async (event, options) => {
+    const locale = normalizeLocale(options?.locale || await getPreferredLocale());
     if (activeJob) {
-      return { ok: false, error: "Обработка уже запущена." };
+      return { ok: false, error: translate(locale, "jobAlreadyRunning") };
     }
 
     const apiKey = await getApiKey();
     if (!apiKey) {
-      return { ok: false, code: "API_KEY_REQUIRED", error: "Сначала сохраните ключ OpenAI." };
+      return {
+        ok: false,
+        code: "API_KEY_REQUIRED",
+        error: translate(locale, "apiKeyRequired")
+      };
     }
 
     const controller = new AbortController();
@@ -217,7 +250,7 @@ function registerIpcHandlers() {
     } catch {
       powerBlockerId = null;
     }
-    activeJob = { controller, powerBlockerId };
+    activeJob = { controller, powerBlockerId, locale };
 
     const sourceNames = Array.isArray(options?.videoPaths)
       ? options.videoPaths.map((filePath) => path.basename(String(filePath)))
@@ -226,6 +259,7 @@ function registerIpcHandlers() {
       appVersion: app.getVersion(),
       platform: process.platform,
       sourceFiles: sourceNames,
+      locale,
       identifySpeakers: options?.identifySpeakers !== false,
       splitMeetings: options?.splitMeetings === true
     }).catch(() => {});
@@ -236,6 +270,7 @@ function registerIpcHandlers() {
         outputDirectory: options?.outputDirectory,
         identifySpeakers: options?.identifySpeakers !== false,
         splitMeetings: options?.splitMeetings === true,
+        locale,
         checkpointDirectory: path.join(app.getPath("userData"), "checkpoints"),
         apiKey,
         signal: controller.signal,
@@ -256,7 +291,7 @@ function registerIpcHandlers() {
       }).catch(() => {});
       return { ok: true, ...result };
     } catch (error) {
-      const userError = toUserError(error);
+      const userError = toUserError(error, locale);
       await appendDiagnosticLog("job-error", errorForLog(error)).catch(() => {});
       return {
         ok: false,
@@ -278,7 +313,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle("workflow:cancel", async () => {
     if (!activeJob) return { ok: false };
-    activeJob.controller.abort(new CancelledError());
+    activeJob.controller.abort(new CancelledError(undefined, activeJob.locale));
     return { ok: true };
   });
 
@@ -289,13 +324,13 @@ function registerIpcHandlers() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerIpcHandlers();
-  createWindow();
+  createWindow(await getPreferredLocale());
 });
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+app.on("activate", async () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow(await getPreferredLocale());
 });
 
 app.on("window-all-closed", () => {

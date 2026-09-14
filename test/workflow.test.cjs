@@ -78,6 +78,39 @@ test("рабочий процесс сохраняет расшифровку и
   assert.equal(progress.at(-1).percent, 100);
 });
 
+test("английский режим локализует процесс и оба результата", async (t) => {
+  const paths = await fixture(t);
+  const progress = [];
+  const result = await runMeetingWorkflow({
+    ...paths,
+    apiKey: "not-used",
+    locale: "en",
+    identifySpeakers: false,
+    onProgress: (event) => progress.push(event),
+    dependencies: {
+      splitAudio: fakeSplitAudio(),
+      transcribeAudioFile: async ({ locale }) => {
+        assert.equal(locale, "en");
+        return {
+          text: "We discussed sales",
+          segments: [{ start: 0, end: 3, speaker: "A", text: "We discussed sales" }]
+        };
+      },
+      summarizeTranscript: async ({ transcript, locale }) => {
+        assert.equal(locale, "en");
+        assert.match(transcript, /Speaker A/);
+        return "EXECUTIVE SUMMARY\nWe discussed sales.";
+      }
+    }
+  });
+
+  assert.match(path.basename(result.transcriptPath), /transcript\.txt$/);
+  assert.match(path.basename(result.summaryPath), /summary\.txt$/);
+  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /FULL MEETING TRANSCRIPT/);
+  assert.match(await fs.readFile(result.summaryPath, "utf8"), /MEETING SUMMARY/);
+  assert.match(progress.at(-1).message, /both TXT files/);
+});
+
 test("рабочий процесс подставляет подтверждённое по кадрам имя", async (t) => {
   const paths = await fixture(t);
   const systemFetch = async () => new Response(null, { status: 204 });

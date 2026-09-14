@@ -10,102 +10,132 @@
   </head>
   <body>
     <main class="app-shell">
-      <header class="app-header">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span><span></span><span></span>
+      <header class="brand-hero">
+        <div class="hero-topline">
+          <div class="brand-lockup">
+            <div class="brand-mark" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <div>
+              <p class="brand-name">LUCKROUTE</p>
+              <p class="brand-unit" data-i18n="brandUnit">AI WORKSPACE</p>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <div id="languageSwitch" class="language-switch" role="group" data-i18n-aria="languageSwitchLabel" aria-label="Язык интерфейса">
+              <button type="button" data-locale="ru" aria-pressed="true">RU</button>
+              <button type="button" data-locale="en" aria-pressed="false">EN</button>
+            </div>
+            <button id="settingsButton" class="icon-button hero-settings" type="button" data-i18n-title="settingsTitle" data-i18n-aria="settingsAria" title="Настройки OpenAI" aria-label="Открыть настройки">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"></path>
+                <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.5-2-3.4-2.4 1a8.4 8.4 0 0 0-2.6-1.5L14.1 2h-4l-.4 3.1a8.4 8.4 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0 0 3l-2 1.5 2 3.4 2.4-1a8.4 8.4 0 0 0 2.6 1.5l.4 3.1h4l.4-3.1a8.4 8.4 0 0 0 2.6-1.5l2.4 1 2-3.4-2.1-1.5Z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
-        <div class="header-copy">
-          <p class="eyebrow">LUCKROUTE</p>
-          <h1>Сводка созвона</h1>
-          <p class="subtitle">Из одного или нескольких видео — в расшифровку и подробную сводку</p>
+
+        <div class="hero-copy">
+          <p class="eyebrow" data-i18n="eyebrow">MEETING INTELLIGENCE</p>
+          <h1 data-i18n="appTitle">Сводка созвона</h1>
+          <p class="subtitle" data-i18n="subtitle">Из видеозаписей — в полную расшифровку и содержательную деловую сводку</p>
         </div>
-        <button id="settingsButton" class="icon-button" type="button" title="Настройки OpenAI" aria-label="Открыть настройки">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"></path>
-            <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.5-2-3.4-2.4 1a8.4 8.4 0 0 0-2.6-1.5L14.1 2h-4l-.4 3.1a8.4 8.4 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0 0 3l-2 1.5 2 3.4 2.4-1a8.4 8.4 0 0 0 2.6 1.5l.4 3.1h4l.4-3.1a8.4 8.4 0 0 0 2.6-1.5l2.4 1 2-3.4-2.1-1.5Z"></path>
-          </svg>
-        </button>
+
+        <div class="hero-meta" aria-hidden="true">
+          <span>MP4 · MOV · MKV · AVI · WEBM</span>
+          <span class="meta-dot"></span>
+          <span>OPENAI</span>
+        </div>
       </header>
 
       <section id="keyNotice" class="notice" hidden>
         <div>
-          <strong>Нужна однократная настройка</strong>
-          <span>Сохраните API-ключ OpenAI — после этого останутся выбор файлов и один запуск.</span>
+          <strong data-i18n="keyNoticeTitle">Нужна однократная настройка</strong>
+          <span data-i18n="keyNoticeText">Сохраните API-ключ OpenAI — после этого останутся выбор файлов и один запуск.</span>
         </div>
-        <button id="noticeSettingsButton" class="text-button" type="button">Настроить</button>
+        <button id="noticeSettingsButton" class="text-button" type="button" data-i18n="configure">Настроить</button>
       </section>
 
-      <section class="selection-card" aria-labelledby="sourceHeading">
-        <div class="step-number">1</div>
-        <div class="selection-content">
-          <h2 id="sourceHeading">Видео созвона</h2>
-          <p id="videoPath" class="path-value empty">Видеофайлы не выбраны</p>
-          <ol id="videoList" class="video-list" hidden></ol>
-          <small id="videoOrderHint" class="selection-hint" hidden>Файлы будут обработаны по порядку их названий.</small>
+      <section class="workspace-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow panel-eyebrow" data-i18n="workspaceEyebrow">НОВАЯ ОБРАБОТКА</p>
+            <h2 data-i18n="workspaceTitle">Подготовьте материалы</h2>
+          </div>
+          <span class="one-click-label" data-i18n="oneClick">ОДИН ЗАПУСК</span>
         </div>
-        <button id="chooseVideoButton" class="secondary-button" type="button">Выбрать видео</button>
-      </section>
 
-      <section class="selection-card" aria-labelledby="outputHeading">
-        <div class="step-number">2</div>
-        <div class="selection-content">
-          <h2 id="outputHeading">Место сохранения</h2>
-          <p id="outputPath" class="path-value empty">Папка не выбрана</p>
+        <section class="selection-card" aria-labelledby="sourceHeading">
+          <div class="step-number">01</div>
+          <div class="selection-content">
+            <h3 id="sourceHeading" data-i18n="sourceHeading">Видео созвона</h3>
+            <p id="videoPath" class="path-value empty" data-i18n="noVideos">Видеофайлы не выбраны</p>
+            <ol id="videoList" class="video-list" hidden></ol>
+            <small id="videoOrderHint" class="selection-hint" hidden data-i18n="videoOrderHint">Файлы будут обработаны по порядку их названий.</small>
+          </div>
+          <button id="chooseVideoButton" class="secondary-button" type="button" data-i18n="chooseVideo">Выбрать видео</button>
+        </section>
+
+        <section class="selection-card" aria-labelledby="outputHeading">
+          <div class="step-number">02</div>
+          <div class="selection-content">
+            <h3 id="outputHeading" data-i18n="outputHeading">Место сохранения</h3>
+            <p id="outputPath" class="path-value empty" data-i18n="noFolder">Папка не выбрана</p>
+          </div>
+          <button id="chooseOutputButton" class="secondary-button" type="button" data-i18n="chooseFolder">Выбрать папку</button>
+        </section>
+
+        <div class="options-stack">
+          <label class="analysis-option" for="identifySpeakersCheckbox">
+            <input id="identifySpeakersCheckbox" type="checkbox" checked>
+            <span>
+              <strong data-i18n="identifyNamesTitle">Определять имена участников по видео</strong>
+              <small data-i18n="identifyNamesText">Программа сверит несколько кадров и использует имя только при устойчивом совпадении подписи с индикатором речи.</small>
+            </span>
+          </label>
+
+          <label class="analysis-option" for="splitMeetingsCheckbox">
+            <input id="splitMeetingsCheckbox" type="checkbox">
+            <span>
+              <strong data-i18n="splitMeetingsTitle">В видеофайлах несколько разных созвонов</strong>
+              <small data-i18n="splitMeetingsText">Программа найдёт явные границы и создаст отдельную расшифровку и сводку для каждой встречи.</small>
+            </span>
+          </label>
         </div>
-        <button id="chooseOutputButton" class="secondary-button" type="button">Выбрать папку</button>
-      </section>
 
-      <div class="options-stack">
-        <label class="analysis-option" for="identifySpeakersCheckbox">
-          <input id="identifySpeakersCheckbox" type="checkbox" checked>
-          <span>
-            <strong>Определять имена участников по видео</strong>
-            <small>Программа проверит несколько кадров каждого говорящего и использует имя только при повторном совпадении подписи с индикатором речи.</small>
-          </span>
-        </label>
+        <section id="progressSection" class="progress-card" hidden aria-live="polite">
+          <div class="progress-copy">
+            <span id="progressMessage" data-i18n="preparing">Подготовка…</span>
+            <strong id="progressPercent">0%</strong>
+          </div>
+          <progress id="progressBar" max="100" value="0">0%</progress>
+          <p><span id="elapsedTime">Прошло: 00:00</span><span class="divider">·</span><span data-i18n="progressHint">Можно работать в фоне. Готовые части сохраняются для продолжения после сбоя.</span></p>
+        </section>
 
-        <label class="analysis-option split-option" for="splitMeetingsCheckbox">
-          <input id="splitMeetingsCheckbox" type="checkbox">
-          <span>
-            <strong>В видеофайлах несколько разных созвонов</strong>
-            <small>Программа найдёт явные границы встреч и создаст отдельную расшифровку и сводку для каждого созвона.</small>
-          </span>
-        </label>
-      </div>
+        <section id="resultSection" class="result-card" hidden aria-live="polite">
+          <div class="result-icon" aria-hidden="true">✓</div>
+          <div class="result-copy">
+            <strong id="resultTitle" data-i18n="done">Готово</strong>
+            <span id="resultMessage" data-i18n="filesSaved">Файлы сохранены.</span>
+          </div>
+          <button id="showResultButton" class="text-button" type="button" data-i18n="showFiles">Показать файлы</button>
+        </section>
 
-      <section id="progressSection" class="progress-card" hidden aria-live="polite">
-        <div class="progress-copy">
-          <span id="progressMessage">Подготовка…</span>
-          <strong id="progressPercent">0%</strong>
+        <p id="errorMessage" class="error-message" hidden role="alert"></p>
+        <div id="errorActions" class="error-actions" hidden>
+          <button id="showLogButton" class="danger-text-button" type="button" data-i18n="showLog">Показать журнал диагностики</button>
         </div>
-        <progress id="progressBar" max="100" value="0">0%</progress>
-        <p><span id="elapsedTime">Прошло: 00:00</span> · Можно оставить приложение открытым в фоне. Готовые части сохраняются для продолжения после сбоя.</p>
-      </section>
 
-      <section id="resultSection" class="result-card" hidden aria-live="polite">
-        <div class="result-icon" aria-hidden="true">✓</div>
-        <div class="result-copy">
-          <strong id="resultTitle">Готово</strong>
-          <span id="resultMessage">Файлы сохранены.</span>
+        <div class="action-row">
+          <button id="startButton" class="primary-button" type="button" disabled data-i18n="start">Создать расшифровку и сводку</button>
+          <button id="cancelButton" class="cancel-button" type="button" hidden data-i18n="stop">Остановить</button>
         </div>
-        <button id="showResultButton" class="text-button" type="button">Показать файлы</button>
       </section>
-
-      <p id="errorMessage" class="error-message" hidden role="alert"></p>
-      <div id="errorActions" class="error-actions" hidden>
-        <button id="showLogButton" class="danger-text-button" type="button">Показать журнал диагностики</button>
-      </div>
-
-      <div class="action-row">
-        <button id="startButton" class="primary-button" type="button" disabled>
-          Создать расшифровку и сводку
-        </button>
-        <button id="cancelButton" class="cancel-button" type="button" hidden>Остановить</button>
-      </div>
 
       <footer>
-        <span>На выходе: расшифровка и подробная сводка в TXT</span>
-        <span id="versionLabel"></span>
+        <span data-i18n="outputHint">На выходе: полная расшифровка и подробная сводка в TXT</span>
+        <span class="footer-meta"><span><span data-i18n="developedBy">Разработчик</span>: <strong>Luckroute IT department</strong></span><span id="versionLabel"></span></span>
       </footer>
     </main>
 
@@ -113,20 +143,20 @@
       <form method="dialog" id="settingsForm">
         <div class="dialog-header">
           <div>
-            <p class="eyebrow">НАСТРОЙКИ</p>
-            <h2>Ключ OpenAI</h2>
+            <p class="eyebrow panel-eyebrow" data-i18n="settingsEyebrow">НАСТРОЙКИ</p>
+            <h2 data-i18n="apiKeyTitle">Ключ OpenAI</h2>
           </div>
-          <button id="closeSettingsButton" class="icon-button close-button" type="button" aria-label="Закрыть">×</button>
+          <button id="closeSettingsButton" class="icon-button close-button" type="button" data-i18n-aria="close" aria-label="Закрыть">×</button>
         </div>
-        <p class="dialog-description">Введите API-ключ один раз. Он будет зашифрован средствами Windows или связкой ключей macOS и не попадёт в файлы результата.</p>
-        <label for="apiKeyInput">API-ключ</label>
+        <p class="dialog-description" data-i18n="apiKeyDescription">Введите API-ключ один раз. Он будет зашифрован средствами Windows или связкой ключей macOS и не попадёт в файлы результата.</p>
+        <label for="apiKeyInput" data-i18n="apiKeyLabel">API-ключ</label>
         <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
         <p id="settingsStatus" class="settings-status" aria-live="polite"></p>
         <div class="dialog-actions">
-          <button id="deleteKeyButton" class="danger-text-button" type="button">Удалить ключ</button>
+          <button id="deleteKeyButton" class="danger-text-button" type="button" data-i18n="deleteKey">Удалить ключ</button>
           <span class="spacer"></span>
-          <button id="cancelSettingsButton" class="secondary-button" type="button">Отмена</button>
-          <button id="saveKeyButton" class="primary-small-button" type="submit">Сохранить</button>
+          <button id="cancelSettingsButton" class="secondary-button" type="button" data-i18n="cancel">Отмена</button>
+          <button id="saveKeyButton" class="primary-small-button" type="submit" data-i18n="save">Сохранить</button>
         </div>
       </form>
     </dialog>

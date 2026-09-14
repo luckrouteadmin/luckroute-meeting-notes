@@ -6,7 +6,8 @@ contextBridge.exposeInMainWorld("meetingNotes", {
   getState: () => ipcRenderer.invoke("app:get-state"),
   chooseVideo: () => ipcRenderer.invoke("dialog:choose-video"),
   chooseOutputDirectory: () => ipcRenderer.invoke("dialog:choose-output"),
-  saveApiKey: (apiKey) => ipcRenderer.invoke("settings:save-api-key", apiKey),
+  setLocale: (locale) => ipcRenderer.invoke("settings:set-locale", locale),
+  saveApiKey: (apiKey, locale) => ipcRenderer.invoke("settings:save-api-key", apiKey, locale),
   deleteApiKey: () => ipcRenderer.invoke("settings:delete-api-key"),
   start: (options) => ipcRenderer.invoke("workflow:start", options),
   cancel: () => ipcRenderer.invoke("workflow:cancel"),
@@ -17,4 +18,3 @@ contextBridge.exposeInMainWorld("meetingNotes", {
     return () => ipcRenderer.removeListener("workflow:progress", listener);
   }
 });
-

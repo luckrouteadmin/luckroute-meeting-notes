@@ -32,6 +32,7 @@ const {
 } = require("./meeting-boundaries.cjs");
 const { openCheckpoint } = require("./checkpoint.cjs");
 const { CancelledError, isCancelled } = require("./errors.cjs");
+const { normalizeLocale, translate } = require("./locale.cjs");
 
 const MAX_VIDEO_FILES = 20;
 const SUPPORTED_VIDEO_EXTENSIONS = Object.freeze([
@@ -70,21 +71,25 @@ function normalizeVideoPaths(videoPaths, legacyVideoPath) {
   ));
 }
 
-async function validateInputs(videoPaths, outputDirectory, legacyVideoPath) {
+async function validateInputs(videoPaths, outputDirectory, legacyVideoPath, locale = "ru") {
+  const normalizedLocale = normalizeLocale(locale);
   const normalizedPaths = normalizeVideoPaths(videoPaths, legacyVideoPath);
   if (normalizedPaths.length === 0) {
-    throw new Error("Выберите один или несколько видеофайлов с записью созвона.");
+    throw new Error(translate(normalizedLocale, "noVideos"));
   }
   if (normalizedPaths.length > MAX_VIDEO_FILES) {
-    throw new Error(`За один запуск можно выбрать не более ${MAX_VIDEO_FILES} видеофайлов.`);
+    throw new Error(translate(normalizedLocale, "tooManyVideos", { max: MAX_VIDEO_FILES }));
   }
   for (const videoPath of normalizedPaths) {
     if (!path.isAbsolute(videoPath) || !isSupportedVideoPath(videoPath)) {
-      throw new Error(`Поддерживаются форматы ${SUPPORTED_VIDEO_FORMATS_TEXT}.`);
+      const formats = normalizedLocale === "ru"
+        ? SUPPORTED_VIDEO_FORMATS_TEXT
+        : "MP4, MOV, M4V, MKV, AVI, and WebM";
+      throw new Error(translate(normalizedLocale, "supportedFormats", { formats }));
     }
   }
   if (typeof outputDirectory !== "string" || !path.isAbsolute(outputDirectory)) {
-    throw new Error("Выберите папку для сохранения результата.");
+    throw new Error(translate(normalizedLocale, "chooseOutputDirectory"));
   }
 
   const [videoStats, outputStat] = await Promise.all([
@@ -92,10 +97,10 @@ async function validateInputs(videoPaths, outputDirectory, legacyVideoPath) {
     fs.stat(outputDirectory)
   ]);
   if (videoStats.some((stat) => !stat.isFile())) {
-    throw new Error("Одна из выбранных записей не является файлом.");
+    throw new Error(translate(normalizedLocale, "sourceNotFile"));
   }
   if (!outputStat.isDirectory()) {
-    throw new Error("Выбранное место сохранения не является папкой.");
+    throw new Error(translate(normalizedLocale, "outputNotDirectory"));
   }
   return normalizedPaths;
 }
@@ -109,11 +114,16 @@ function createMemoryCheckpoint() {
   };
 }
 
-function retryProgress(onProgress, percent, subject) {
-  return ({ nextAttempt, maxAttempts }) => onProgress({
+function retryProgress(onProgress, percent, subjectKey, locale) {
+  return ({ nextAttempt, maxAttempts, delayMs }) => onProgress({
     stage: "network-retry",
     percent,
-    message: `Связь прервалась при ${subject} — повторяю запрос ${nextAttempt} из ${maxAttempts}…`
+    message: translate(locale, "networkRetry", {
+      subject: translate(locale, subjectKey),
+      next: nextAttempt,
+      max: maxAttempts,
+      seconds: Math.max(1, Math.ceil((delayMs || 0) / 1000))
+    })
   });
 }
 
@@ -124,14 +134,21 @@ async function runMeetingWorkflow({
   apiKey,
   identifySpeakers = true,
   splitMeetings = false,
+  locale = "ru",
   checkpointDirectory,
   signal,
   fetchImpl,
   onProgress = () => {},
   dependencies = {}
 }) {
-  const normalizedVideoPaths = await validateInputs(videoPaths, outputDirectory, videoPath);
-  if (signal?.aborted) throw new CancelledError();
+  const normalizedLocale = normalizeLocale(locale);
+  const normalizedVideoPaths = await validateInputs(
+    videoPaths,
+    outputDirectory,
+    videoPath,
+    normalizedLocale
+  );
+  if (signal?.aborted) throw new CancelledError(undefined, normalizedLocale);
 
   const sources = normalizedVideoPaths.map((sourcePath, sourceIndex) => ({
     sourceIndex,
@@ -139,7 +156,7 @@ async function runMeetingWorkflow({
     sourceName: path.basename(sourcePath)
   }));
   const sourceNames = sources.map((source) => source.sourceName);
-  const outputStem = deriveOutputStem(normalizedVideoPaths);
+  const outputStem = deriveOutputStem(normalizedVideoPaths, normalizedLocale);
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-notes-"));
   const splitAudioImpl = dependencies.splitAudio || splitAudio;
   const transcribeImpl = dependencies.transcribeAudioFile || transcribeAudioFile;
@@ -162,13 +179,13 @@ async function runMeetingWorkflow({
       onProgress({
         stage: "checkpoint-unavailable",
         percent: 1,
-        message: "Не удалось включить восстановление, но обработка продолжится."
+        message: translate(normalizedLocale, "checkpointUnavailable")
       });
     }
 
     const chunkGroups = [];
     for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
-      if (signal?.aborted) throw new CancelledError();
+      if (signal?.aborted) throw new CancelledError(undefined, normalizedLocale);
       const source = sources[sourceIndex];
       const audioDirectory = path.join(
         temporaryDirectory,
@@ -179,8 +196,11 @@ async function runMeetingWorkflow({
         stage: "audio",
         percent: 3 + Math.round(((sourceIndex + 1) / sources.length) * 8),
         message: sources.length > 1
-          ? `Извлекаю звук: файл ${sourceIndex + 1} из ${sources.length}…`
-          : "Извлекаю звук из видео…"
+          ? translate(normalizedLocale, "audioMany", {
+            current: sourceIndex + 1,
+            total: sources.length
+          })
+          : translate(normalizedLocale, "audioOne")
       });
       const chunks = await splitAudioImpl({
         inputPath: source.sourcePath,
@@ -196,16 +216,18 @@ async function runMeetingWorkflow({
     let checkpointWarningShown = false;
     for (const group of chunkGroups) {
       for (let chunkIndex = 0; chunkIndex < group.chunks.length; chunkIndex += 1) {
-        if (signal?.aborted) throw new CancelledError();
+        if (signal?.aborted) throw new CancelledError(undefined, normalizedLocale);
         const progressPercent = 12 + Math.round(((completedChunks + 1) / totalChunks) * 43);
         const checkpointKey = `${group.sourceIndex}:${chunkIndex}`;
         let result = checkpoint.get(checkpointKey);
         onProgress({
           stage: result ? "transcription-restored" : "transcription",
           percent: progressPercent,
-          message: result
-            ? `Восстанавливаю готовую часть ${completedChunks + 1} из ${totalChunks}…`
-            : `Расшифровываю часть ${completedChunks + 1} из ${totalChunks}…`
+          message: translate(
+            normalizedLocale,
+            result ? "transcriptionRestored" : "transcribing",
+            { current: completedChunks + 1, total: totalChunks }
+          )
         });
         if (!result) {
           result = await transcribeImpl({
@@ -213,7 +235,13 @@ async function runMeetingWorkflow({
             apiKey,
             signal,
             fetchImpl,
-            onRetry: retryProgress(onProgress, progressPercent, "расшифровке")
+            locale: normalizedLocale,
+            onRetry: retryProgress(
+              onProgress,
+              progressPercent,
+              "retryTranscription",
+              normalizedLocale
+            )
           });
           try {
             await checkpoint.set(checkpointKey, {
@@ -227,7 +255,7 @@ async function runMeetingWorkflow({
               onProgress({
                 stage: "checkpoint-unavailable",
                 percent: progressPercent,
-                message: "Не удалось сохранить точку восстановления, но обработка продолжается."
+                message: translate(normalizedLocale, "checkpointSaveFailed")
               });
             }
           }
@@ -256,7 +284,7 @@ async function runMeetingWorkflow({
         onProgress({
           stage: "speaker-identification",
           percent: 58,
-          message: `Подготавливаю кадры для определения имён: ${samples.length}…`
+          message: translate(normalizedLocale, "prepareFrames", { count: samples.length })
         });
         try {
           const frames = await extractFramesImpl({
@@ -271,42 +299,50 @@ async function runMeetingWorkflow({
               apiKey,
               signal,
               fetchImpl,
+              locale: normalizedLocale,
               onProgress: ({ completedBatches, totalBatches, message }) => onProgress({
                 stage: "speaker-identification",
                 percent: 60 + Math.round((completedBatches / Math.max(1, totalBatches)) * 7),
                 message
               }),
-              onRetry: retryProgress(onProgress, 63, "определении имён")
+              onRetry: retryProgress(
+                onProgress,
+                63,
+                "retrySpeakers",
+                normalizedLocale
+              )
             });
             const mappings = aggregateSpeakerNames(frames, observations);
             identifiedSpeakerCount = new Set(Object.values(mappings)).size;
             resolvedParts = applySpeakerNames(parts, mappings);
           }
         } catch (error) {
-          if (signal?.aborted || isCancelled(error)) throw new CancelledError();
+          if (signal?.aborted || isCancelled(error)) {
+            throw new CancelledError(undefined, normalizedLocale);
+          }
           onProgress({
             stage: "speaker-identification-skipped",
             percent: 67,
-            message: "Имена определить не удалось — продолжаю с нейтральными метками спикеров."
+            message: translate(normalizedLocale, "speakerIdentificationSkipped")
           });
         }
       }
     }
 
-    const utterances = flattenTranscriptParts(resolvedParts);
+    const utterances = flattenTranscriptParts(resolvedParts, { locale: normalizedLocale });
     if (utterances.length === 0) {
-      const error = new Error("В записи не удалось распознать речь.");
+      const error = new Error(translate(normalizedLocale, "emptyTranscript"));
       error.code = "EMPTY_TRANSCRIPT";
       throw error;
     }
 
-    let ranges = normalizeMeetingRanges([], utterances.length);
+    let ranges = normalizeMeetingRanges([], utterances.length, normalizedLocale);
     let splitDetectionSkipped = false;
     if (splitMeetings) {
       onProgress({
         stage: "meeting-boundaries",
         percent: 69,
-        message: "Ищу границы отдельных созвонов…"
+        message: translate(normalizedLocale, "findMeetingBoundaries")
       });
       try {
         const detected = await detectBoundariesImpl({
@@ -314,22 +350,35 @@ async function runMeetingWorkflow({
           apiKey,
           signal,
           fetchImpl,
-          onRetry: retryProgress(onProgress, 70, "поиске границ созвонов")
+          locale: normalizedLocale,
+          onRetry: retryProgress(
+            onProgress,
+            70,
+            "retryBoundaries",
+            normalizedLocale
+          )
         });
-        ranges = normalizeMeetingRanges(detected, utterances.length);
+        ranges = normalizeMeetingRanges(detected, utterances.length, normalizedLocale);
       } catch (error) {
-        if (signal?.aborted || isCancelled(error)) throw new CancelledError();
+        if (signal?.aborted || isCancelled(error)) {
+          throw new CancelledError(undefined, normalizedLocale);
+        }
         splitDetectionSkipped = true;
         onProgress({
           stage: "meeting-boundaries-skipped",
           percent: 72,
-          message: "Автоматическое разделение не удалось — сохраню запись как один созвон."
+          message: translate(normalizedLocale, "meetingSplitSkipped")
         });
       }
     }
 
     const meetings = splitUtterancesByMeetings(utterances, ranges);
-    const outputPairs = await chooseMeetingOutputPaths(outputDirectory, outputStem, meetings);
+    const outputPairs = await chooseMeetingOutputPaths(
+      outputDirectory,
+      outputStem,
+      meetings,
+      normalizedLocale
+    );
     const createdAt = new Date();
     const transcripts = [];
     for (let index = 0; index < meetings.length; index += 1) {
@@ -338,7 +387,8 @@ async function runMeetingWorkflow({
       const transcript = formatTranscriptUtterances(meeting.utterances, {
         sourceNames,
         title,
-        createdAt
+        createdAt,
+        locale: normalizedLocale
       });
       await atomicWriteText(outputPairs[index].transcriptPath, transcript);
       createdFiles.push(outputPairs[index].transcriptPath);
@@ -348,10 +398,12 @@ async function runMeetingWorkflow({
       stage: "saved-transcript",
       percent: 75,
       message: meetings.length > 1
-        ? `Сохранены расшифровки: ${meetings.length}. Формирую отдельные сводки…`
+        ? translate(normalizedLocale, "savedTranscriptsMany", { count: meetings.length })
         : identifiedSpeakerCount > 0
-          ? `Полная расшифровка сохранена. Определено имён: ${identifiedSpeakerCount}.`
-          : "Полная расшифровка сохранена."
+          ? translate(normalizedLocale, "savedTranscriptWithNames", {
+            count: identifiedSpeakerCount
+          })
+          : translate(normalizedLocale, "savedTranscript")
     });
 
     for (let index = 0; index < meetings.length; index += 1) {
@@ -367,9 +419,13 @@ async function runMeetingWorkflow({
           onProgress,
           progressStart,
           progressEnd,
+          locale: normalizedLocale,
           label: meetings.length > 1
-            ? `созвона ${index + 1} из ${meetings.length}`
-            : "созвона"
+            ? translate(normalizedLocale, "summaryLabelMany", {
+              current: index + 1,
+              total: meetings.length
+            })
+            : translate(normalizedLocale, "summaryLabelOne")
         });
       } catch (error) {
         error.transcriptPath = outputPairs[index].transcriptPath;
@@ -380,7 +436,8 @@ async function runMeetingWorkflow({
         formatSummaryFile(summary, {
           sourceNames,
           title: meetings.length > 1 ? meetings[index].title : undefined,
-          createdAt
+          createdAt,
+          locale: normalizedLocale
         })
       );
       createdFiles.push(outputPairs[index].summaryPath);
@@ -391,8 +448,11 @@ async function runMeetingWorkflow({
       stage: "complete",
       percent: 100,
       message: meetings.length > 1
-        ? `Готово: создано созвонов — ${meetings.length}, TXT-файлов — ${createdFiles.length}.`
-        : "Готово: оба TXT-файла сохранены."
+        ? translate(normalizedLocale, "completeMany", {
+          meetings: meetings.length,
+          files: createdFiles.length
+        })
+        : translate(normalizedLocale, "completeOne")
     });
     return {
       transcriptPath: outputPairs[0].transcriptPath,
@@ -401,12 +461,13 @@ async function runMeetingWorkflow({
       meetingCount: meetings.length,
       identifiedSpeakerCount,
       splitDetectionSkipped,
+      locale: normalizedLocale,
       outputDirectory
     };
   } catch (error) {
     if (createdFiles.length > 0) {
       error.createdFiles = [...createdFiles];
-      error.transcriptPath ||= createdFiles.find((filePath) => filePath.endsWith("— расшифровка.txt")) || null;
+      error.transcriptPath ||= createdFiles[0] || null;
       error.outputDirectory = outputDirectory;
     }
     throw error;

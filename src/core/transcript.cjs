@@ -1,5 +1,7 @@
 "use strict";
 
+const { translate } = require("./locale.cjs");
+
 function formatTimestamp(totalSeconds) {
   const value = Math.max(0, Math.floor(Number(totalSeconds) || 0));
   const hours = Math.floor(value / 3600);
@@ -8,19 +10,21 @@ function formatTimestamp(totalSeconds) {
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
-function speakerName(value) {
+function speakerName(value, locale = "ru") {
   const raw = String(value || "").trim();
-  if (!raw) return "Спикер";
-  if (/^speaker\s+/i.test(raw)) return raw.replace(/^speaker\s+/i, "Спикер ");
-  if (/^спикер\s+/i.test(raw)) return raw;
-  return `Спикер ${raw}`;
+  const label = translate(locale, "speaker");
+  if (!raw) return label;
+  if (/^(?:speaker|спикер)\s+/i.test(raw)) {
+    return `${label} ${raw.replace(/^(?:speaker|спикер)\s+/i, "")}`;
+  }
+  return `${label} ${raw}`;
 }
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function formatPart(part) {
+function formatPart(part, locale = "ru") {
   const offset = Number(part.sourceOffsetSeconds ?? part.offsetSeconds) || 0;
   const segments = Array.isArray(part.segments) ? part.segments : [];
   if (segments.length > 0) {
@@ -29,7 +33,7 @@ function formatPart(part) {
       .map((segment) => {
         const start = formatTimestamp(offset + (Number(segment.start) || 0));
         const end = formatTimestamp(offset + (Number(segment.end) || Number(segment.start) || 0));
-        const label = normalizeText(segment.speakerName) || speakerName(segment.speaker);
+        const label = normalizeText(segment.speakerName) || speakerName(segment.speaker, locale);
         return `[${start}–${end}] ${label}: ${normalizeText(segment.text)}`;
       })
       .join("\n");
@@ -39,7 +43,7 @@ function formatPart(part) {
   return text ? `[${formatTimestamp(offset)}] ${text}` : "";
 }
 
-function flattenTranscriptParts(parts) {
+function flattenTranscriptParts(parts, { locale = "ru" } = {}) {
   const utterances = [];
   for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
     const part = parts[partIndex] || {};
@@ -61,7 +65,7 @@ function flattenTranscriptParts(parts) {
           sourceName: part.sourceName || "",
           startSeconds: sourceOffsetSeconds + relativeStart,
           endSeconds: sourceOffsetSeconds + relativeEnd,
-          speakerLabel: identifiedName || speakerName(segment?.speaker),
+          speakerLabel: identifiedName || speakerName(segment?.speaker, locale),
           identifiedName: identifiedName || null,
           text
         });
@@ -78,7 +82,7 @@ function flattenTranscriptParts(parts) {
         sourceName: part.sourceName || "",
         startSeconds: sourceOffsetSeconds,
         endSeconds: sourceOffsetSeconds,
-        speakerLabel: "Спикер",
+        speakerLabel: translate(locale, "speaker"),
         identifiedName: null,
         text
       });
@@ -87,11 +91,15 @@ function flattenTranscriptParts(parts) {
   return utterances;
 }
 
-function sourceHeader(sourceNames) {
+function sourceHeader(sourceNames, locale = "ru") {
   const names = (Array.isArray(sourceNames) ? sourceNames : [sourceNames]).filter(Boolean);
-  if (names.length <= 1) return [`Исходный файл: ${names[0] || "не указан"}`];
+  if (names.length <= 1) {
+    return [translate(locale, "sourceFile", {
+      name: names[0] || translate(locale, "notSpecified")
+    })];
+  }
   return [
-    "Исходные файлы (в порядке обработки):",
+    translate(locale, "sourceFiles"),
     ...names.map((name, index) => `${index + 1}. ${name}`)
   ];
 }
@@ -99,22 +107,25 @@ function sourceHeader(sourceNames) {
 function formatTranscriptUtterances(utterances, {
   sourceNames,
   title,
-  createdAt = new Date()
+  createdAt = new Date(),
+  locale = "ru"
 }) {
   const identifiedNames = [...new Set(utterances
     .map((utterance) => normalizeText(utterance.identifiedName))
     .filter(Boolean))];
   const header = [
-    "ПОЛНАЯ РАСШИФРОВКА СОЗВОНА",
-    ...(title ? [`Название: ${title}`] : []),
-    ...sourceHeader(sourceNames),
-    `Создано: ${createdAt.toLocaleString("ru-RU")}`,
+    translate(locale, "fullTranscriptTitle"),
+    ...(title ? [translate(locale, "titleLabel", { title })] : []),
+    ...sourceHeader(sourceNames, locale),
+    translate(locale, "createdLabel", {
+      date: createdAt.toLocaleString(translate(locale, "dateLocale"))
+    }),
     ...(identifiedNames.length > 0
       ? [
-        `Имена, определённые по видео: ${identifiedNames.join(", ")}`,
-        "Примечание: имена добавлены только при повторном совпадении читаемой подписи и видимого индикатора говорящего."
+        translate(locale, "identifiedNames", { names: identifiedNames.join(", ") }),
+        translate(locale, "identifiedNamesNote")
       ]
-      : ["Примечание: нейтральные обозначения спикеров могут начинаться заново после каждого аудиофрагмента."])
+      : [translate(locale, "neutralNamesNote")])
   ];
 
   const body = [];
@@ -122,8 +133,11 @@ function formatTranscriptUtterances(utterances, {
   const multipleSources = new Set(utterances.map((utterance) => utterance.sourceIndex)).size > 1;
   for (const utterance of utterances) {
     if (multipleSources && utterance.sourceIndex !== previousSource) {
-      const visibleName = sourceNames?.[utterance.sourceIndex] || utterance.sourceName || `Файл ${utterance.sourceIndex + 1}`;
-      body.push("", `ФАЙЛ ${utterance.sourceIndex + 1} — ${visibleName}`);
+      const number = utterance.sourceIndex + 1;
+      const visibleName = sourceNames?.[utterance.sourceIndex]
+        || utterance.sourceName
+        || translate(locale, "fileFallback", { number });
+      body.push("", translate(locale, "fileSection", { number, name: visibleName }));
       previousSource = utterance.sourceIndex;
     }
     const start = formatTimestamp(utterance.startSeconds);
@@ -133,10 +147,11 @@ function formatTranscriptUtterances(utterances, {
   return `${header.join("\n")}\n${body.join("\n")}\n`;
 }
 
-function formatFullTranscript(parts, { sourceName, createdAt = new Date() }) {
-  return formatTranscriptUtterances(flattenTranscriptParts(parts), {
+function formatFullTranscript(parts, { sourceName, createdAt = new Date(), locale = "ru" }) {
+  return formatTranscriptUtterances(flattenTranscriptParts(parts, { locale }), {
     sourceNames: [sourceName],
-    createdAt
+    createdAt,
+    locale
   });
 }
 

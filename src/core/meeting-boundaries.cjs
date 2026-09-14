@@ -1,6 +1,7 @@
 "use strict";
 
 const { normalizeText, formatTimestamp } = require("./transcript.cjs");
+const { translate } = require("./locale.cjs");
 
 const MAX_BOUNDARY_SEGMENT_CHARACTERS = 320;
 
@@ -14,27 +15,34 @@ function sanitizeMeetingTitle(value, fallback) {
   return title || fallback;
 }
 
-function buildBoundaryInput(utterances) {
+function buildBoundaryInput(utterances, locale = "ru") {
   return utterances.map((utterance) => {
     const source = Number(utterance.sourceIndex) + 1;
     const timestamp = formatTimestamp(utterance.startSeconds);
-    const speaker = normalizeText(utterance.speakerLabel) || "Спикер";
+    const speaker = normalizeText(utterance.speakerLabel) || translate(locale, "speaker");
     let text = normalizeText(utterance.text);
     if (text.length > MAX_BOUNDARY_SEGMENT_CHARACTERS) {
       text = `${text.slice(0, MAX_BOUNDARY_SEGMENT_CHARACTERS - 1).trimEnd()}…`;
     }
-    return `[ID ${utterance.id}][Файл ${source}][${timestamp}] ${speaker}: ${text}`;
+    return `[ID ${utterance.id}][${translate(locale, "boundaryFile", { number: source })}][${timestamp}] ${speaker}: ${text}`;
   }).join("\n");
 }
 
-function normalizeMeetingRanges(rawMeetings, totalUtterances) {
+function normalizeMeetingRanges(rawMeetings, totalUtterances, locale = "ru") {
   const total = Math.max(0, Math.trunc(Number(totalUtterances) || 0));
   if (total === 0) return [];
-  const fallback = [{ title: "Созвон", startSegmentId: 1, endSegmentId: total }];
+  const fallback = [{
+    title: translate(locale, "defaultMeeting"),
+    startSegmentId: 1,
+    endSegmentId: total
+  }];
   if (!Array.isArray(rawMeetings) || rawMeetings.length === 0) return fallback;
 
   const normalized = rawMeetings.map((meeting, index) => ({
-    title: sanitizeMeetingTitle(meeting?.title, `Созвон ${index + 1}`),
+    title: sanitizeMeetingTitle(
+      meeting?.title,
+      translate(locale, "defaultMeetingNumber", { number: index + 1 })
+    ),
     startSegmentId: Math.trunc(Number(meeting?.start_segment_id)),
     endSegmentId: Math.trunc(Number(meeting?.end_segment_id))
   })).sort((left, right) => left.startSegmentId - right.startSegmentId);

@@ -9,7 +9,10 @@ const {
   createTextResponse,
   extractResponseText,
   identifySpeakersFromFrames,
+  isRetryableStatus,
   normalizeRequestError,
+  REQUEST_ATTEMPTS,
+  requestWithRetry,
   splitLongText,
   transcribeAudioFile
 } = require("../src/core/openai-api.cjs");
@@ -33,6 +36,36 @@ test("тайм-аут сети отличается от отмены польз
   });
   assert.equal(normalized.code, "NETWORK_TIMEOUT");
   assert.match(toUserError(normalized).message, /слишком долго/);
+});
+
+test("HTTP 520 и другие ответы 5xx повторяются до успешного результата", async () => {
+  let calls = 0;
+  const delays = [];
+  const retries = [];
+  const result = await requestWithRetry({
+    url: "https://api.openai.com/v1/responses",
+    apiKey: "secret-key-for-test-only",
+    bodyFactory: () => "{}",
+    randomImpl: () => 0.5,
+    sleepImpl: async (delayMs) => delays.push(delayMs),
+    onRetry: (details) => retries.push(details),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls < 3) return new Response("temporary", { status: 520 });
+      return new Response(JSON.stringify({ output_text: "Готово" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+  });
+
+  assert.equal(result.output_text, "Готово");
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [1250, 2500]);
+  assert.deepEqual(retries.map((item) => item.reason), ["HTTP 520", "HTTP 520"]);
+  assert.ok(retries.every((item) => item.maxAttempts === REQUEST_ATTEMPTS));
+  assert.equal(isRetryableStatus(520), true);
+  assert.equal(isRetryableStatus(400), false);
 });
 
 test("текст извлекается из обычного JSON Responses API", () => {
@@ -70,6 +103,7 @@ test("запрос расшифровки использует диаризац�
       assert.equal(options.body.get("model"), "gpt-4o-transcribe-diarize");
       assert.equal(options.body.get("response_format"), "diarized_json");
       assert.equal(options.body.get("chunking_strategy"), "auto");
+      assert.equal(options.body.get("language"), "ru");
       return new Response(JSON.stringify({ text: "Привет", segments: [] }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -77,6 +111,23 @@ test("запрос расшифровки использует диаризац�
     }
   });
   assert.equal(result.text, "Привет");
+});
+
+test("английский режим передаёт язык в запрос расшифровки", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-api-en-test-"));
+  const audioPath = path.join(directory, "audio.mp3");
+  await fs.writeFile(audioPath, "audio bytes");
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  await transcribeAudioFile({
+    filePath: audioPath,
+    apiKey: "secret-key-for-test-only",
+    locale: "en",
+    fetchImpl: async (_url, options) => {
+      assert.equal(options.body.get("language"), "en");
+      return new Response(JSON.stringify({ text: "Hello", segments: [] }), { status: 200 });
+    }
+  });
 });
 
 test("запрос сводки отключает хранение ответа и использует Responses API", async () => {

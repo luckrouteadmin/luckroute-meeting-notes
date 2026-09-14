@@ -30,3 +30,11 @@ test("несколько видео получают понятное общее
   assert.match(result, /Еженедельный созвон/);
   assert.match(result, /объединено/);
 });
+
+test("английский режим создаёт английские имена выходных файлов", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-output-en-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const result = await chooseOutputPaths(directory, "Sales call", "en");
+  assert.equal(path.basename(result.summaryPath), "Sales call — summary.txt");
+  assert.equal(path.basename(result.transcriptPath), "Sales call — transcript.txt");
+});
