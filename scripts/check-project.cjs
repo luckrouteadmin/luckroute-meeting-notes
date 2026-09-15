@@ -26,6 +26,7 @@ const requiredFiles = [
   "src/ui/luckroute.svg",
   "scripts/mac-adhoc-sign.cjs",
   "build/entitlements.mac.plist",
+  "build/native-utf8.manifest",
   "build/icon.png",
   "build/icon.ico",
   ".github/workflows/build-installers.yml",

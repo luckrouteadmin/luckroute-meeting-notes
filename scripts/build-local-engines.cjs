@@ -17,6 +17,38 @@ function command(binary, args, cwd, capture = false) {
   return execFileSync(binary, args, { cwd, stdio: capture ? "pipe" : "inherit", encoding: "utf8", windowsHide: true });
 }
 
+async function enableWindowsUtf8(binary, root, buildDirectory) {
+  // Whisper's model loader expects UTF-8 but its CLI otherwise receives ANSI argv.
+  // Set the code page per process, without changing the user's Windows settings.
+  const cache = await fs.readFile(path.join(buildDirectory, "CMakeCache.txt"), "utf8");
+  const cmakeMt = cache.match(/^CMAKE_MT:[^=]+=(.+)$/m)?.[1]?.trim();
+  const candidates = cmakeMt && path.isAbsolute(cmakeMt) ? [cmakeMt] : [];
+  const sdk = path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Windows Kits", "10", "bin");
+  const versions = (await fs.readdir(sdk).catch(() => [])).filter(name => /^10\./.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }));
+  for (const version of versions) candidates.push(path.join(sdk, version, "x64", "mt.exe"));
+  let mt;
+  for (const candidate of candidates) if (await fs.stat(candidate).catch(() => null)) { mt = candidate; break; }
+  if (!mt) throw new Error("Windows SDK manifest tool (mt.exe) is required to package UTF-8 native engines");
+  command(mt, ["-nologo", `-inputresource:${binary};#1`, "-manifest", path.join(root, "build", "native-utf8.manifest"), `-outputresource:${binary};#1`], buildDirectory);
+  const extracted = path.join(buildDirectory, "luckroute-verified.manifest");
+  command(mt, ["-nologo", `-inputresource:${binary};#1`, `-out:${extracted}`], buildDirectory);
+  if (!/activeCodePage[^>]*>UTF-8</.test(await fs.readFile(extracted, "utf8"))) throw new Error("Native UTF-8 manifest verification failed");
+}
+
+async function verifyWhisperUnicode(binary, directory) {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "luckroute-native-test-"));
+  try {
+    const model = path.join(temporary, "проверка-模型.bin");
+    await fs.writeFile(model, Buffer.alloc(16));
+    let diagnostics = "";
+    try { command(binary, ["-m", model, "-f", path.join(directory, "samples", "jfk.wav"), "-ng"], temporary, true); }
+    catch (error) { diagnostics = String(error.stderr || ""); }
+    // Reaching the magic check proves the exact Unicode file could be opened.
+    if (!diagnostics.includes("bad magic")) throw new Error("Native Unicode model-path smoke test failed");
+    console.log("Native Unicode model-path smoke test passed");
+  } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+}
+
 async function main() {
   const root = path.resolve(__dirname, "..");
   const output = path.join(root, "resources", "local", `${process.platform}-${process.arch}`);
@@ -56,8 +88,10 @@ async function main() {
     const installed = path.join(output, source.target + extension);
     await fs.copyFile(binary, installed);
     await fs.chmod(installed, 0o755);
+    if (process.platform === "win32") await enableWindowsUtf8(installed, root, path.join(directory, "build"));
     await fs.copyFile(path.join(directory, "LICENSE"), path.join(output, `${source.name}-LICENSE.txt`));
     command(installed, ["--help"], output, true);
+    if (source.name === "whisper") await verifyWhisperUnicode(installed, directory);
   }
   await fs.writeFile(path.join(output, "versions.json"), JSON.stringify(SOURCES, null, 2) + "\n");
 }
