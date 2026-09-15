@@ -41,7 +41,7 @@
         </div>
 
         <div class="hero-meta" aria-hidden="true">
-          <span>MP4 · MOV · MKV · AVI · WEBM</span>
+          <span>MP4 · MOV · MP3 · WAV · M4A · FLAC</span>
           <span class="meta-dot"></span>
           <span data-i18n="modeMeta">ЛОКАЛЬНО / OPENAI</span>
         </div>
@@ -100,13 +100,12 @@
         </section>
 
         <div class="options-stack">
-          <label class="analysis-option" for="identifySpeakersCheckbox">
-            <input id="identifySpeakersCheckbox" type="checkbox" checked>
+          <div id="identityNotice" class="analysis-option identity-notice">
             <span>
-              <strong data-i18n="identifyNamesTitle">Определять имена участников по видео</strong>
-              <small id="identifyNamesDescription" data-i18n="identifyNamesText">Программа сверит несколько кадров и использует имя только при устойчивом совпадении подписи с индикатором речи.</small>
+              <strong data-i18n="identifyNamesTitle">Имена и роли — автоматически</strong>
+              <small id="identifyNamesDescription" data-i18n="identifyNamesText">Программа сопоставляет видео и диалог. Предположительная роль помечается отдельно от подтверждённой должности.</small>
             </span>
-          </label>
+          </div>
 
           <label class="analysis-option" for="splitMeetingsCheckbox">
             <input id="splitMeetingsCheckbox" type="checkbox">

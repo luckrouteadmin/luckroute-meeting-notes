@@ -11,6 +11,6 @@ test("локаль определяется по системному значе
 });
 
 test("переводы подставляют параметры", () => {
-  assert.equal(translate("en", "tooManyVideos", { max: 20 }), "You can select no more than 20 video files per run.");
+  assert.equal(translate("en", "tooManyVideos", { max: 20 }), "You can select no more than 20 files per run.");
   assert.equal(translate("ru", "defaultMeetingNumber", { number: 2 }), "Созвон 2");
 });

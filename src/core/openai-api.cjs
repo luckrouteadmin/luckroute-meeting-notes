@@ -10,6 +10,7 @@ const {
 } = require("./prompt.cjs");
 const { buildBoundaryInput } = require("./meeting-boundaries.cjs");
 const { normalizeLocale, translate } = require("./locale.cjs");
+const { CONTEXT_SCHEMA, contextInstructions, contextRows, buildContextWindows } = require("./context-identity.cjs");
 
 const API_BASE_URL = "https://api.openai.com/v1";
 const TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
@@ -431,6 +432,36 @@ async function identifySpeakerFrameBatch({
   return parseSpeakerObservations(payload, locale);
 }
 
+async function identifySpeakersFromContext({ parts, apiKey, signal, fetchImpl = fetch, onRetry, onProgress = () => {}, locale = "ru" }) {
+  const rows = contextRows(parts);
+  if (!rows.some(row => row.speaker_key)) return [];
+  const windows = buildContextWindows(rows);
+  const observations = [];
+  for (let index = 0; index < windows.length; index++) {
+    onProgress({ current: index + 1, total: windows.length });
+    const payload = await requestWithRetry({
+      url: `${API_BASE_URL}/responses`, apiKey, signal, fetchImpl, onRetry, locale,
+      headers: { "Content-Type": "application/json" },
+      bodyFactory: () => JSON.stringify({
+        model: SPEAKER_VISION_MODEL, instructions: contextInstructions(locale),
+        input: [{ role: "user", content: [{ type: "input_text", text: JSON.stringify({ dialogue: windows[index] }) }] }],
+        reasoning: { effort: "low" }, text: { format: { type: "json_schema", name: "context_speaker_observations", strict: true, schema: CONTEXT_SCHEMA }, verbosity: "low" },
+        max_output_tokens: 6000, store: false
+      })
+    });
+    let parsed;
+    try { parsed = JSON.parse(extractResponseText(payload, locale)); } catch { parsed = null; }
+    if (!Array.isArray(parsed?.observations)) throw new ApiError(locale === "en"
+      ? "Could not read context identification." : "Не удалось прочитать имена и роли по контексту.", { code: "INVALID_CONTEXT_RESPONSE" });
+    // Bind evidence to the actual window sent, not to arbitrary transcript IDs.
+    const ids = new Set(windows[index].map(row => row.id));
+    for (const item of parsed.observations) {
+      if (Array.isArray(item?.evidence) && item.evidence.every(evidence => ids.has(evidence.segment_id))) observations.push(item);
+    }
+  }
+  return observations;
+}
+
 async function identifySpeakersFromFrames({
   samples,
   apiKey,
@@ -655,6 +686,7 @@ module.exports = {
   extractResponseText,
   identifySpeakerFrameBatch,
   identifySpeakersFromFrames,
+  identifySpeakersFromContext,
   isRetryableStatus,
   normalizeRequestError,
   parseMeetingBoundaries,

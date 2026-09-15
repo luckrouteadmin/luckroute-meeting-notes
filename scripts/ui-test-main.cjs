@@ -25,7 +25,8 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('#versionLabel').textContent.includes('1.3.0')");
     assert.equal(await execute("document.querySelector('#openaiModeButton').disabled"), true);
     assert.notEqual(await execute("getComputedStyle(document.querySelector('#cloudLock')).display"), "none");
-    assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox').disabled"), true);
+    assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox') === null"), true);
+    assert.match(await execute("document.querySelector('#identifyNamesDescription').textContent"), /не разделяет голоса/);
     assert.equal(await execute("document.querySelector('#startButton').disabled"), true);
     assert.equal(await execute("document.querySelector('.brand-mark').naturalWidth > 0"), true);
     assert.equal(await execute("document.documentElement.scrollWidth <= innerWidth"), true);
@@ -39,7 +40,7 @@ app.whenReady().then(async () => {
     await waitFor("!document.querySelector('#startButton').disabled");
     await click("startButton");
     await waitFor("!document.querySelector('#resultSection').hidden");
-    assert.equal(starts[0].mode, "local"); assert.equal(starts[0].identifySpeakers, false);
+    assert.equal(starts[0].mode, "local"); assert.equal(Object.hasOwn(starts[0], "identifySpeakers"), false);
     assert.equal(starts[0].videoPaths.length, 2);
     await execute("document.querySelector('[data-locale=en]').click()");
     await waitFor("document.documentElement.lang === 'en'");
@@ -52,7 +53,7 @@ app.whenReady().then(async () => {
     assert.equal(await execute("document.querySelector('#localModeButton').getAttribute('aria-pressed')"), "true");
     await click("openaiModeButton");
     await waitFor("document.querySelector('#openaiModeButton').getAttribute('aria-pressed') === 'true'");
-    assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox').disabled"), false);
+    assert.match(await execute("document.querySelector('#identifyNamesDescription').textContent"), /dialogue/);
     await painted();
     await fs.writeFile(path.join(screenshots, "openai-en.png"), (await window.webContents.capturePage()).toPNG());
     await click("startButton");

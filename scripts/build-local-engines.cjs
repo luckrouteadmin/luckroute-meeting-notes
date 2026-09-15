@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
+const { assertStaticRuntime } = require("./verify-pe-runtime.cjs");
 
 const SOURCES = Object.freeze([
   { name: "whisper", repository: "https://github.com/ggml-org/whisper.cpp.git",
@@ -66,7 +67,7 @@ async function main() {
     try { actual = command("git", ["rev-parse", "HEAD"], directory, true).trim(); } catch {}
     if (actual !== source.commit) {
       command("git", ["fetch", "--depth", "1", "origin", source.commit], directory);
-      command("git", ["switch", "--detach", "FETCH_HEAD"], directory);
+      command("git", ["-c", "core.longpaths=true", "switch", "--detach", "FETCH_HEAD"], directory);
     }
     if (command("git", ["rev-parse", "HEAD"], directory, true).trim() !== source.commit) throw new Error("Native source pin mismatch");
     const flags = ["-S", directory, "-B", path.join(directory, "build"), "-DCMAKE_BUILD_TYPE=Release",
@@ -77,7 +78,7 @@ async function main() {
       "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DLLAMA_BUILD_SERVER=OFF",
       "-DLLAMA_BUILD_APP=OFF", "-DLLAMA_BUILD_UI=OFF", "-DLLAMA_OPENSSL=OFF"];
     if (process.arch === "x64") flags.push("-DGGML_BMI2=OFF", "-DGGML_AVX2=OFF", "-DGGML_AVX512=OFF", "-DGGML_FMA=OFF", "-DGGML_F16C=OFF");
-    if (process.platform === "win32") flags.push("-A", "x64", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
+    if (process.platform === "win32") flags.push("-A", "x64", "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW", "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
     if (process.platform === "darwin") flags.push("-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0");
     command("cmake", flags, directory);
     command("cmake", ["--build", path.join(directory, "build"), "--config", "Release", "--parallel", String(Math.min(4, os.cpus().length)), "--target", source.target], directory);
@@ -88,7 +89,10 @@ async function main() {
     const installed = path.join(output, source.target + extension);
     await fs.copyFile(binary, installed);
     await fs.chmod(installed, 0o755);
-    if (process.platform === "win32") await enableWindowsUtf8(installed, root, path.join(directory, "build"));
+    if (process.platform === "win32") {
+      await enableWindowsUtf8(installed, root, path.join(directory, "build"));
+      console.log("Native system-only DLL dependencies:", (await assertStaticRuntime(installed)).join(", "));
+    }
     await fs.copyFile(path.join(directory, "LICENSE"), path.join(output, `${source.name}-LICENSE.txt`));
     command(installed, ["--help"], output, true);
     if (source.name === "whisper") await verifyWhisperUnicode(installed, directory);

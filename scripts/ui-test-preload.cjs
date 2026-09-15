@@ -2,7 +2,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("meetingNotes", {
   getState: async () => ({ version: "1.3.0", locale: "ru", hasApiKey: false, mode: "local", localModels: { ready: false } }),
-  chooseVideo: async () => ["C:\\Calls\\part-01.mov", "C:\\Calls\\part-02.mp4"],
+  chooseVideo: async () => ["C:\\Calls\\part-01.mov", "C:\\Calls\\part-02.mp3"],
   chooseOutputDirectory: async () => "C:\\Results",
   setLocale: async (locale) => ({ ok: true, locale }),
   setMode: async (mode) => ({ ok: true, mode }),

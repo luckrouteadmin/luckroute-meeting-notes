@@ -9,6 +9,7 @@ const {
   createTextResponse,
   extractResponseText,
   identifySpeakersFromFrames,
+  identifySpeakersFromContext,
   isRetryableStatus,
   normalizeRequestError,
   REQUEST_ATTEMPTS,
@@ -17,6 +18,27 @@ const {
   transcribeAudioFile
 } = require("../src/core/openai-api.cjs");
 const { ApiError, toUserError } = require("../src/core/errors.cjs");
+
+test("контекст отправляет только текст без хранения и отклоняет цитаты вне окна", async () => {
+  const valid = { speaker_key: "0:A", name: "Мария", role: null, role_category: "unknown", confidence: "high", basis: "self_introduction", evidence: [{ segment_id: "p0-s0", quote: "Меня зовут Мария." }] };
+  const observations = await identifySpeakersFromContext({
+    parts: [{ segments: [{ speaker: "A", text: "Меня зовут Мария." }] }], apiKey: "test-only",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.store, false); assert.equal(body.text.format.strict, true);
+      assert.equal(body.text.format.name, "context_speaker_observations");
+      assert.ok(body.input.every(item => item.content.every(content => content.type === "input_text")));
+      const dialogue = JSON.parse(body.input[0].content[0].text).dialogue;
+      assert.equal(dialogue[0].speaker_key, "0:A");
+      return new Response(JSON.stringify({ output_text: JSON.stringify({ observations: [valid, { ...valid, evidence: [{ segment_id: "p99-s0", quote: valid.evidence[0].quote }] }] }) }), { status: 200 });
+    }
+  });
+  assert.deepEqual(observations, [valid]);
+});
+
+test("контекст не придумывает голоса, если распознавание не вернуло меток", async () => {
+  assert.deepEqual(await identifySpeakersFromContext({ parts: [{ segments: [{ text: "Меня зовут Мария." }] }], fetchImpl: () => { throw new Error("No request expected"); } }), []);
+});
 
 test("сетевая ошибка преобразуется в понятное сообщение для пользователя", () => {
   const original = new TypeError("fetch failed");

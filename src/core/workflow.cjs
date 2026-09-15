@@ -7,6 +7,7 @@ const { splitAudio, AUDIO_CHUNK_SECONDS } = require("./audio.cjs");
 const {
   detectMeetingBoundaries,
   identifySpeakersFromFrames,
+  identifySpeakersFromContext,
   transcribeAudioFile,
   summarizeTranscript
 } = require("./openai-api.cjs");
@@ -33,24 +34,12 @@ const {
 const { openCheckpoint } = require("./checkpoint.cjs");
 const { CancelledError, isCancelled } = require("./errors.cjs");
 const { normalizeLocale, translate } = require("./locale.cjs");
+const { contextRows, resolveContextObservations, applyContextIdentities } = require("./context-identity.cjs");
+const { SUPPORTED_VIDEO_EXTENSIONS, SUPPORTED_AUDIO_EXTENSIONS, SUPPORTED_MEDIA_EXTENSIONS,
+  isSupportedVideoPath, isSupportedMediaPath, formatsText } = require("./media.cjs");
 
 const MAX_VIDEO_FILES = 20;
-const SUPPORTED_VIDEO_EXTENSIONS = Object.freeze([
-  ".mp4",
-  ".mov",
-  ".m4v",
-  ".mkv",
-  ".avi",
-  ".webm"
-]);
-const SUPPORTED_VIDEO_EXTENSION_SET = new Set(SUPPORTED_VIDEO_EXTENSIONS);
-const SUPPORTED_VIDEO_FORMATS_TEXT = "MP4, MOV, M4V, MKV, AVI и WebM";
 const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
-
-function isSupportedVideoPath(videoPath) {
-  return typeof videoPath === "string"
-    && SUPPORTED_VIDEO_EXTENSION_SET.has(path.extname(videoPath).toLowerCase());
-}
 
 function normalizeVideoPaths(videoPaths, legacyVideoPath) {
   const candidates = Array.isArray(videoPaths)
@@ -81,10 +70,8 @@ async function validateInputs(videoPaths, outputDirectory, legacyVideoPath, loca
     throw new Error(translate(normalizedLocale, "tooManyVideos", { max: MAX_VIDEO_FILES }));
   }
   for (const videoPath of normalizedPaths) {
-    if (!path.isAbsolute(videoPath) || !isSupportedVideoPath(videoPath)) {
-      const formats = normalizedLocale === "ru"
-        ? SUPPORTED_VIDEO_FORMATS_TEXT
-        : "MP4, MOV, M4V, MKV, AVI, and WebM";
+    if (!path.isAbsolute(videoPath) || !isSupportedMediaPath(videoPath)) {
+      const formats = formatsText(normalizedLocale);
       throw new Error(translate(normalizedLocale, "supportedFormats", { formats }));
     }
   }
@@ -176,6 +163,7 @@ async function runMeetingWorkflow({
   const summarizeImpl = dependencies.summarizeTranscript || summarizeTranscript;
   const extractFramesImpl = dependencies.extractSpeakerFrames || extractSpeakerFrames;
   const identifyFramesImpl = dependencies.identifySpeakersFromFrames || identifySpeakersFromFrames;
+  const identifyContextImpl = dependencies.identifySpeakersFromContext || identifySpeakersFromContext;
   const detectBoundariesImpl = dependencies.detectMeetingBoundaries || detectMeetingBoundaries;
   const openCheckpointImpl = dependencies.openCheckpoint || openCheckpoint;
   const createdFiles = [];
@@ -290,8 +278,11 @@ async function runMeetingWorkflow({
 
     let resolvedParts = parts;
     let identifiedSpeakerCount = 0;
+    let identifiedRoleCount = 0;
     if (identifySpeakers) {
-      const samples = selectSpeakerSamples(parts);
+      // Keep original part indices: speaker IDs are scoped to a transcription chunk.
+      const samples = selectSpeakerSamples(parts.map(part => isSupportedVideoPath(part.sourcePath)
+        ? part : { ...part, segments: [] }));
       if (samples.length > 0) {
         const framesDirectory = path.join(temporaryDirectory, "speaker-frames");
         await fs.mkdir(framesDirectory, { recursive: true });
@@ -341,6 +332,21 @@ async function runMeetingWorkflow({
           });
         }
       }
+    }
+
+    if (identifySpeakers && mode === "openai" && parts.some(part => part.segments.some(segment => segment.speaker))) {
+      try {
+        const observations = await identifyContextImpl({ parts: resolvedParts, apiKey, signal, fetchImpl, locale: normalizedLocale,
+          onProgress: ({ current, total }) => onProgress({ stage: "context-identification", percent: 67,
+            message: translate(normalizedLocale, "contextIdentity", { current, total }) }),
+          onRetry: retryProgress(onProgress, 67, "retrySpeakers", normalizedLocale) });
+        resolvedParts = applyContextIdentities(resolvedParts, resolveContextObservations(contextRows(resolvedParts), observations, normalizedLocale));
+      } catch (error) {
+        if (signal?.aborted || isCancelled(error)) throw new CancelledError(undefined, normalizedLocale);
+        onProgress({ stage: "context-identification-skipped", percent: 68, message: translate(normalizedLocale, "contextIdentitySkipped") });
+      }
+      identifiedSpeakerCount = new Set(resolvedParts.flatMap(part => part.segments.map(segment => segment.speakerName).filter(Boolean))).size;
+      identifiedRoleCount = new Set(resolvedParts.flatMap((part, index) => part.segments.filter(segment => segment.speakerRole).map(segment => `${index}:${segment.speaker}`))).size;
     }
 
     const utterances = flattenTranscriptParts(resolvedParts, { locale: normalizedLocale });
@@ -475,6 +481,7 @@ async function runMeetingWorkflow({
       files: createdFiles,
       meetingCount: meetings.length,
       identifiedSpeakerCount,
+      identifiedRoleCount,
       splitDetectionSkipped,
       locale: normalizedLocale,
       mode,
@@ -495,7 +502,10 @@ async function runMeetingWorkflow({
 module.exports = {
   MAX_VIDEO_FILES,
   SUPPORTED_VIDEO_EXTENSIONS,
+  SUPPORTED_AUDIO_EXTENSIONS,
+  SUPPORTED_MEDIA_EXTENSIONS,
   isSupportedVideoPath,
+  isSupportedMediaPath,
   normalizeVideoPaths,
   runMeetingWorkflow,
   validateInputs

@@ -158,7 +158,7 @@ function applySpeakerNames(parts, mappings) {
     ...part,
     segments: (Array.isArray(part.segments) ? part.segments : []).map((segment) => {
       const name = mappings[makeSpeakerKey(partIndex, segment?.speaker)];
-      return name ? { ...segment, speakerName: name } : { ...segment };
+      return name ? { ...segment, speakerName: name, identitySource: "video" } : { ...segment };
     })
   }));
 }

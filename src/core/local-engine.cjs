@@ -5,7 +5,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { runLocalProcess } = require("./local-process.cjs");
 const { MODELS, requireModels, localError } = require("./local-models.cjs");
-const { getSummaryInstructions, getExtractionInstructions } = require("./prompt.cjs");
+const { getExtractionInstructions } = require("./prompt.cjs");
+const { getLocalSummaryInstructions } = require("./local-prompt.cjs");
 const { splitAudio } = require("./audio.cjs");
 const { CancelledError } = require("./errors.cjs");
 
@@ -111,7 +112,7 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
       } finally { await fs.rm(`${prefix}.json`, { force: true }).catch(() => {}); }
     },
     async summarizeTranscript({ transcript, signal: requestSignal = signal, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
-      const instructions = getSummaryInstructions(locale);
+      const instructions = getLocalSummaryInstructions(locale);
       const finalBudget = LOCAL_CONTEXT - Buffer.byteLength(buildLocalPrompt(instructions, "")) - 2800 - 128;
       let blocks = splitByBytes(transcript, Math.min(INPUT_BYTES, finalBudget));
       const total = blocks.length;
