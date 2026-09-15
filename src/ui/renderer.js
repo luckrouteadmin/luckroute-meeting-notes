@@ -325,7 +325,8 @@ function updateControls() {
   elements.openaiModeButton.disabled = busy || !state.hasApiKey;
   elements.openaiModeButton.title = state.hasApiKey ? "OpenAI" : t("cloudLocked");
   elements.openaiModeButton.setAttribute("aria-label", elements.openaiModeButton.title);
-  elements.cloudLock.hidden = state.hasApiKey;
+  // SVG does not expose HTMLElement.hidden; set the actual attribute for CSS.
+  elements.cloudLock.toggleAttribute("hidden", state.hasApiKey);
   elements.localModeButton.setAttribute("aria-pressed", String(local));
   elements.openaiModeButton.setAttribute("aria-pressed", String(!local));
   elements.modeDescription.textContent = t(local ? "localDescription" : "cloudDescription");

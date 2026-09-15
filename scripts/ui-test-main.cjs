@@ -24,7 +24,7 @@ app.whenReady().then(async () => {
     await window.loadFile(path.join(__dirname, "../src/ui/index.html"));
     await waitFor("document.querySelector('#versionLabel').textContent.includes('1.3.0')");
     assert.equal(await execute("document.querySelector('#openaiModeButton').disabled"), true);
-    assert.equal(await execute("document.querySelector('#cloudLock').hidden"), false);
+    assert.notEqual(await execute("getComputedStyle(document.querySelector('#cloudLock')).display"), "none");
     assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox').disabled"), true);
     assert.equal(await execute("document.querySelector('#startButton').disabled"), true);
     assert.equal(await execute("document.querySelector('.brand-mark').naturalWidth > 0"), true);
@@ -48,6 +48,7 @@ app.whenReady().then(async () => {
     await execute("document.querySelector('#apiKeyInput').value='test-key-never-sent-anywhere';document.querySelector('#settingsForm').requestSubmit()");
     await waitFor("!document.querySelector('#settingsDialog').open");
     assert.equal(await execute("document.querySelector('#openaiModeButton').disabled"), false);
+    assert.equal(await execute("getComputedStyle(document.querySelector('#cloudLock')).display"), "none");
     assert.equal(await execute("document.querySelector('#localModeButton').getAttribute('aria-pressed')"), "true");
     await click("openaiModeButton");
     await waitFor("document.querySelector('#openaiModeButton').getAttribute('aria-pressed') === 'true'");
@@ -59,6 +60,7 @@ app.whenReady().then(async () => {
     assert.equal(starts[1].mode, "openai"); assert.equal(starts[1].locale, "en");
     await click("settingsButton"); await click("deleteKeyButton");
     await waitFor("document.querySelector('#openaiModeButton').disabled");
+    assert.notEqual(await execute("getComputedStyle(document.querySelector('#cloudLock')).display"), "none");
     await click("closeSettingsButton");
     assert.equal(await execute("document.querySelector('#localModeButton').getAttribute('aria-pressed')"), "true");
     window.setSize(760, 760);
