@@ -8,9 +8,10 @@ if (process.platform === "linux") app.commandLine.appendSwitch("no-sandbox");
 const starts = [];
 ipcMain.handle("qa:record-start", (_event, options) => { starts.push(options); return true; });
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ width: 920, height: 1080, show: false,
-    webPreferences: { preload: path.join(__dirname, "ui-test-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  const window = new BrowserWindow({ width: 920, height: 1080, show: true,
+    webPreferences: { preload: path.join(__dirname, "ui-test-preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const execute = (source) => window.webContents.executeJavaScript(source, true);
+  const painted = () => execute("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   async function waitFor(source) {
     for (let i = 0; i < 100; i++) {
       if (await execute(source)) return;
@@ -30,6 +31,7 @@ app.whenReady().then(async () => {
     assert.equal(await execute("document.documentElement.scrollWidth <= innerWidth"), true);
     const screenshots = path.resolve("ui-check");
     await fs.mkdir(screenshots, { recursive: true });
+    await painted();
     await fs.writeFile(path.join(screenshots, "local-ru.png"), (await window.webContents.capturePage()).toPNG());
     await click("downloadModelsButton");
     await waitFor("document.querySelector('#modelStatus').textContent.includes('готово')");
@@ -50,6 +52,7 @@ app.whenReady().then(async () => {
     await click("openaiModeButton");
     await waitFor("document.querySelector('#openaiModeButton').getAttribute('aria-pressed') === 'true'");
     assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox').disabled"), false);
+    await painted();
     await fs.writeFile(path.join(screenshots, "openai-en.png"), (await window.webContents.capturePage()).toPNG());
     await click("startButton");
     await waitFor("!document.querySelector('#resultSection').hidden");
