@@ -28,7 +28,7 @@ test("подтверждённое имя выводится вместо слу
       segments: [{ start: 2, end: 5, speaker: "A", speakerName: "Анастасия", text: "Добрый день" }]
     }
   ], { sourceName: "call.mp4", createdAt: new Date("2026-09-02T10:00:00Z") });
-  assert.match(transcript, /Имена, определённые по видео: Анастасия/);
+  assert.match(transcript, /Определённые участники: Анастасия/);
   assert.match(transcript, /Анастасия: Добрый день/);
   assert.doesNotMatch(transcript, /Спикер A: Добрый день/);
 });

@@ -78,6 +78,7 @@ h3 { margin: 0 0 4px; font-size: 13px; }
 .analysis-option small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .analysis-option:has(input:checked):not(.unavailable) { border-color: #8bd9ee; background: var(--blue-soft); }
 .analysis-option.unavailable { background: #f5f7f8; cursor: default; }
+.identity-notice { cursor: default; background: var(--blue-soft); }
 .secondary-button, .cancel-button, .primary-small-button { border-radius: 10px; }
 .secondary-button { padding: 9px 12px; border: 1px solid #bcd6e2; color: var(--ink); background: white; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .secondary-button:hover:not(:disabled) { border-color: #0b9ac0; background: var(--blue-soft); }

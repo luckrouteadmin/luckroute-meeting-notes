@@ -24,6 +24,13 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function participantLabel(segment, locale = "ru") {
+  const name = normalizeText(segment.speakerName) || speakerName(segment.speaker, locale);
+  const role = normalizeText(segment.speakerRole);
+  if (!role) return name;
+  return `${name} — ${role}${segment.roleInferred ? (locale === "en" ? " (inferred role)" : " (предположительная роль)") : ""}`;
+}
+
 function formatPart(part, locale = "ru") {
   const offset = Number(part.sourceOffsetSeconds ?? part.offsetSeconds) || 0;
   const segments = Array.isArray(part.segments) ? part.segments : [];
@@ -33,7 +40,7 @@ function formatPart(part, locale = "ru") {
       .map((segment) => {
         const start = formatTimestamp(offset + (Number(segment.start) || 0));
         const end = formatTimestamp(offset + (Number(segment.end) || Number(segment.start) || 0));
-        const label = normalizeText(segment.speakerName) || speakerName(segment.speaker, locale);
+        const label = participantLabel(segment, locale);
         return `[${start}–${end}] ${label}: ${normalizeText(segment.text)}`;
       })
       .join("\n");
@@ -65,8 +72,12 @@ function flattenTranscriptParts(parts, { locale = "ru" } = {}) {
           sourceName: part.sourceName || "",
           startSeconds: sourceOffsetSeconds + relativeStart,
           endSeconds: sourceOffsetSeconds + relativeEnd,
-          speakerLabel: identifiedName || speakerName(segment?.speaker, locale),
+          speakerLabel: participantLabel(segment, locale),
           identifiedName: identifiedName || null,
+          identitySource: segment.identitySource || (identifiedName ? "video" : null),
+          identityEvidence: segment.identityEvidence || [],
+          roleInferred: Boolean(segment.roleInferred),
+          speakerRole: segment.speakerRole || null,
           text
         });
       }
@@ -114,6 +125,19 @@ function formatTranscriptUtterances(utterances, {
   const identifiedNames = [...new Set(utterances
     .map((utterance) => normalizeText(utterance.identifiedName))
     .filter(Boolean))];
+  const identities = new Map();
+  for (const item of utterances) {
+    if (!item.identitySource) continue;
+    const key = `${item.speakerLabel}:${item.identitySource}`;
+    if (!identities.has(key)) identities.set(key, item);
+  }
+  const identityNotes = [...identities.values()].map(item => {
+    const origin = item.identitySource === "video" ? (locale === "en" ? "video" : "видео")
+      : item.identitySource === "video+context" ? (locale === "en" ? "video + dialogue" : "видео + контекст")
+      : (locale === "en" ? "dialogue" : "контекст");
+    const evidence = item.identityEvidence.slice(0, 3).map(e => `«${normalizeText(e.quote)}»`).join("; ");
+    return `- ${item.speakerLabel}: ${origin}${evidence ? `; ${locale === "en" ? "evidence" : "основание"}: ${evidence}` : ""}`;
+  });
   const header = [
     translate(locale, "fullTranscriptTitle"),
     ...(mode === "local" ? [locale === "en"
@@ -126,10 +150,11 @@ function formatTranscriptUtterances(utterances, {
     }),
     ...(identifiedNames.length > 0
       ? [
-        translate(locale, "identifiedNames", { names: identifiedNames.join(", ") }),
-        translate(locale, "identifiedNamesNote")
+        translate(locale, "identifiedNames", { names: identifiedNames.join(", ") })
       ]
-      : [translate(locale, "neutralNamesNote")])
+      : []),
+    ...(identityNotes.length ? [translate(locale, "identifiedNamesNote"), ...identityNotes] : []),
+    translate(locale, "neutralNamesNote")
   ];
 
   const body = [];

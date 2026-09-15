@@ -11,7 +11,7 @@ const COPY = Object.freeze({
     settingsAria: "Открыть настройки",
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Сводка созвона",
-    subtitle: "Из видеозаписей — в полную расшифровку и содержательную деловую сводку",
+    subtitle: "Из видео и аудио — в полную расшифровку и содержательную деловую сводку",
     keyNoticeTitle: "OpenAI заблокирован без ключа",
     keyNoticeText: "Локальный режим доступен без ключа. Добавьте свой API-ключ, если хотите включить облачную обработку.",
     modeMeta: "ЛОКАЛЬНО / OPENAI",
@@ -19,8 +19,8 @@ const COPY = Object.freeze({
     localMode: "На компьютере",
     cloudLocked: "OpenAI заблокирован. Добавьте API-ключ в настройках.",
     localDescription: "Расшифровка и сводка создаются на вашем компьютере. После установки моделей интернет не нужен; записи, текст и кадры никуда не отправляются.",
-    cloudDescription: "Аудио и текст отправляются в OpenAI. При определении имён отправляются также отдельные кадры. Нужен интернет; использование оплачивается по вашему API-ключу.",
-    localNames: "Доступно только в OpenAI. Локальный режим пока не различает голоса и не определяет имена по видео.",
+    cloudDescription: "Аудио и текст отправляются в OpenAI. Для видеозаписей программа автоматически анализирует также отдельные кадры с подписями. Нужен интернет; использование оплачивается по вашему API-ключу.",
+    localNames: "Имена и роли учитываются в сводке по явно сказанному. Локальный режим пока не разделяет голоса и не подписывает отдельные реплики именами.",
     modelRequirements: "Whisper + Qwen3 · загрузка около 3 ГБ с Hugging Face · рекомендуется 8 ГБ ОЗУ, лучше 16 ГБ. Скорость и качество зависят от компьютера; сводка может уступать OpenAI.",
     downloadModels: "Скачать модели",
     pauseDownload: "Приостановить",
@@ -33,18 +33,18 @@ const COPY = Object.freeze({
     workspaceEyebrow: "НОВАЯ ОБРАБОТКА",
     workspaceTitle: "Подготовьте материалы",
     oneClick: "ОДИН ЗАПУСК",
-    sourceHeading: "Видео созвона",
-    noVideos: "Видеофайлы не выбраны",
-    videoNotSelected: "Видеофайл не выбран",
+    sourceHeading: "Видео или аудио созвона",
+    noVideos: "Записи не выбраны",
+    videoNotSelected: "Запись не выбрана",
     selectedFiles: "Выбрано файлов: {count}",
     videoOrderHint: "Файлы будут обработаны по порядку их названий.",
-    chooseVideo: "Выбрать видео",
+    chooseVideo: "Выбрать файлы",
     outputHeading: "Место сохранения",
     noFolder: "Папка не выбрана",
     chooseFolder: "Выбрать папку",
-    identifyNamesTitle: "Определять имена участников по видео",
-    identifyNamesText: "Программа сверит несколько кадров и использует имя только при устойчивом совпадении подписи с индикатором речи.",
-    splitMeetingsTitle: "В видеофайлах несколько разных созвонов",
+    identifyNamesTitle: "Имена и роли — автоматически",
+    identifyNamesText: "Программа сопоставляет видео, самопредставления и обращения в разговоре. Предположительная роль помечается отдельно от подтверждённой должности.",
+    splitMeetingsTitle: "В записях несколько разных созвонов",
     splitMeetingsText: "Программа найдёт явные границы и создаст отдельную расшифровку и сводку для каждой встречи.",
     preparing: "Подготовка…",
     processing: "Обработка…",
@@ -82,7 +82,8 @@ const COPY = Object.freeze({
     filesDoneMessage: "Сохранено TXT-файлов: {count}",
     oneDoneTitle: "Готово — сохранены два TXT-файла",
     oneDoneMessage: "Расшифровка и подробная сводка готовы",
-    namesCount: "имён: {count}"
+    namesCount: "имён: {count}",
+    rolesCount: "ролей: {count}"
   }),
   en: Object.freeze({
     documentTitle: "Meeting Notes — Luckroute",
@@ -92,7 +93,7 @@ const COPY = Object.freeze({
     settingsAria: "Open settings",
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Meeting Notes",
-    subtitle: "Turn video recordings into a full transcript and a substantive business summary",
+    subtitle: "Turn video and audio recordings into a full transcript and a substantive business summary",
     keyNoticeTitle: "OpenAI is locked without a key",
     keyNoticeText: "Local mode works without a key. Add your API key if you want to enable cloud processing.",
     modeMeta: "LOCAL / OPENAI",
@@ -100,8 +101,8 @@ const COPY = Object.freeze({
     localMode: "On this computer",
     cloudLocked: "OpenAI is locked. Add an API key in settings.",
     localDescription: "Transcripts and summaries are created on your computer. Once models are installed, no internet is needed. Recordings, text and frames never leave this device.",
-    cloudDescription: "Audio and text are sent to OpenAI, along with selected frames if name identification is enabled. Requires internet; charges apply to your API key.",
-    localNames: "OpenAI only. Local mode does not yet distinguish voices or identify names from video.",
+    cloudDescription: "Audio and text are sent to OpenAI. For video recordings, selected frames are also analyzed automatically to identify speakers. Requires internet; charges apply to your API key.",
+    localNames: "Explicitly mentioned names and roles are used in the summary. Local mode does not yet distinguish voices or assign names to individual utterances.",
     modelRequirements: "Whisper + Qwen3 · about 3 GB downloaded from Hugging Face · 8 GB RAM recommended, preferably 16 GB. Speed depends on your computer; summaries may be less capable than OpenAI.",
     downloadModels: "Download models",
     pauseDownload: "Pause download",
@@ -114,18 +115,18 @@ const COPY = Object.freeze({
     workspaceEyebrow: "NEW PROCESSING JOB",
     workspaceTitle: "Prepare your files",
     oneClick: "ONE START",
-    sourceHeading: "Meeting video",
-    noVideos: "No video files selected",
-    videoNotSelected: "No video selected",
+    sourceHeading: "Meeting video or audio",
+    noVideos: "No recordings selected",
+    videoNotSelected: "No recording selected",
     selectedFiles: "Files selected: {count}",
     videoOrderHint: "Files will be processed in filename order.",
-    chooseVideo: "Choose video",
+    chooseVideo: "Choose files",
     outputHeading: "Save location",
     noFolder: "No folder selected",
     chooseFolder: "Choose folder",
-    identifyNamesTitle: "Identify participant names from video",
-    identifyNamesText: "The app compares several frames and uses a name only when the visible label consistently matches the active-speaker indicator.",
-    splitMeetingsTitle: "The video files contain separate meetings",
+    identifyNamesTitle: "Names and roles — automatic",
+    identifyNamesText: "The app combines video labels, self-introductions and dialogue. Inferred roles are marked separately from confirmed job titles.",
+    splitMeetingsTitle: "The recordings contain separate meetings",
     splitMeetingsText: "The app finds clear boundaries and creates a separate transcript and summary for every meeting.",
     preparing: "Preparing…",
     processing: "Processing…",
@@ -163,7 +164,8 @@ const COPY = Object.freeze({
     filesDoneMessage: "TXT files saved: {count}",
     oneDoneTitle: "Done — two TXT files saved",
     oneDoneMessage: "The transcript and detailed summary are ready",
-    namesCount: "names: {count}"
+    namesCount: "names: {count}",
+    rolesCount: "roles: {count}"
   })
 });
 
@@ -184,7 +186,7 @@ const elements = {
   noticeSettingsButton: document.querySelector("#noticeSettingsButton"),
   chooseVideoButton: document.querySelector("#chooseVideoButton"),
   chooseOutputButton: document.querySelector("#chooseOutputButton"),
-  identifySpeakersCheckbox: document.querySelector("#identifySpeakersCheckbox"),
+  identityNotice: document.querySelector("#identityNotice"),
   splitMeetingsCheckbox: document.querySelector("#splitMeetingsCheckbox"),
   videoPath: document.querySelector("#videoPath"),
   videoList: document.querySelector("#videoList"),
@@ -314,8 +316,6 @@ function updateControls() {
   elements.startButton.disabled = busy || state.videoPaths.length === 0 || !state.outputDirectory || (local && !state.modelsReady);
   elements.chooseVideoButton.disabled = busy;
   elements.chooseOutputButton.disabled = busy;
-  elements.identifySpeakersCheckbox.disabled = busy || local;
-  elements.identifySpeakersCheckbox.closest("label").classList.toggle("unavailable", local);
   elements.identifyNamesDescription.textContent = t(local ? "localNames" : "identifyNamesText");
   elements.splitMeetingsCheckbox.disabled = busy;
   elements.settingsButton.disabled = busy;
@@ -367,6 +367,7 @@ function renderResult() {
         count: result.identifiedSpeakerCount
       })}`;
     }
+    if (result.identifiedRoleCount > 0) elements.resultMessage.textContent += ` · ${t("rolesCount", { count: result.identifiedRoleCount })}`;
   }
   elements.showResultButton.textContent = t("showFiles");
   elements.resultSection.hidden = false;
@@ -557,7 +558,6 @@ elements.startButton.addEventListener("click", async () => {
       videoPaths: state.videoPaths,
       mode: state.mode,
       outputDirectory: state.outputDirectory,
-      identifySpeakers: state.mode === "openai" && elements.identifySpeakersCheckbox.checked,
       splitMeetings: elements.splitMeetingsCheckbox.checked,
       locale: state.locale
     });

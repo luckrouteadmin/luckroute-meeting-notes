@@ -15,7 +15,7 @@ const {
 
 const {
   runMeetingWorkflow,
-  SUPPORTED_VIDEO_EXTENSIONS
+  SUPPORTED_MEDIA_EXTENSIONS
 } = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
 const { normalizeLocale, translate } = require("../src/core/locale.cjs");
@@ -25,7 +25,7 @@ const { downloadModels, getModelStatus } = require("../src/core/local-models.cjs
 const SETTINGS_FILE = "settings.json";
 const LOG_FILE = "meeting-notes.log";
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
-const VIDEO_DIALOG_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS.map((extension) => extension.slice(1));
+const VIDEO_DIALOG_EXTENSIONS = SUPPORTED_MEDIA_EXTENSIONS.map((extension) => extension.slice(1));
 const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 let mainWindow = null;
 let activeJob = null;
@@ -306,7 +306,7 @@ function registerIpcHandlers() {
       sourceFiles: sourceNames,
       locale,
       mode,
-      identifySpeakers: mode === "openai" && options?.identifySpeakers !== false,
+      identifySpeakers: mode === "openai",
       splitMeetings: options?.splitMeetings === true
     }).catch(() => {});
 
@@ -324,7 +324,7 @@ function registerIpcHandlers() {
       const result = await runMeetingWorkflow({
         videoPaths: options?.videoPaths,
         outputDirectory: options?.outputDirectory,
-        identifySpeakers: options?.identifySpeakers !== false,
+        identifySpeakers: true,
         splitMeetings: options?.splitMeetings === true,
         locale,
         mode,

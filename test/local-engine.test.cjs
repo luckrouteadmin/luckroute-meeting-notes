@@ -73,7 +73,7 @@ test("local workflow never invokes cloud transcription, summary, boundaries, or 
   const forbidden = () => assert.fail("A cloud capability was called in local mode");
   const result = await runMeetingWorkflow({ videoPaths: [video], outputDirectory: directory,
     mode: "local", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
-    dependencies: { transcribeAudioFile: forbidden, summarizeTranscript: forbidden, identifySpeakersFromFrames: forbidden, extractSpeakerFrames: forbidden, detectMeetingBoundaries: forbidden },
+    dependencies: { transcribeAudioFile: forbidden, summarizeTranscript: forbidden, identifySpeakersFromFrames: forbidden, identifySpeakersFromContext: forbidden, extractSpeakerFrames: forbidden, detectMeetingBoundaries: forbidden },
     localEngine: {
       splitAudio: async () => ["local.wav"],
       transcribeAudioFile: async (options) => { assert.equal(options.apiKey, undefined); assert.equal(options.fetchImpl, undefined); return { text: "Решили запустить проект.", segments: [{ start: 0, end: 3, text: "Решили запустить проект." }] }; },

@@ -104,8 +104,8 @@ if (!mainProcess.includes("net.fetch") || !mainProcess.includes("fetchImpl")) {
 }
 
 const interfaceHtml = fs.readFileSync(path.join(root, "src/ui/index.html"), "utf8");
-if (!interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("splitMeetingsCheckbox")) {
-  throw new Error("В интерфейсе должны быть настройки определения имён и разделения созвонов.");
+if (interfaceHtml.includes("identifySpeakersCheckbox") || !interfaceHtml.includes("identityNotice") || !interfaceHtml.includes("splitMeetingsCheckbox")) {
+  throw new Error("Определение участников должно быть автоматическим, разделение созвонов — по выбору.");
 }
 if (!interfaceHtml.includes("languageSwitch") || !interfaceHtml.includes("data-i18n")) {
   throw new Error("Интерфейс должен поддерживать переключение русского и английского языков.");
@@ -119,14 +119,14 @@ if (!mainProcess.includes("powerSaveBlocker") || !mainProcess.includes("multiSel
   throw new Error("Главный процесс должен защищать долгую обработку и поддерживать несколько видеофайлов.");
 }
 
-const workflow = fs.readFileSync(path.join(root, "src/core/workflow.cjs"), "utf8");
-for (const extension of [".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"]) {
-  if (!workflow.includes(`"${extension}"`)) {
-    throw new Error(`В списке поддерживаемых видеоформатов нет ${extension}.`);
+const media = require("../src/core/media.cjs");
+for (const extension of [".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif", ".amr"]) {
+  if (!media.SUPPORTED_MEDIA_EXTENSIONS.includes(extension)) {
+    throw new Error(`В списке поддерживаемых форматов нет ${extension}.`);
   }
 }
-if (!mainProcess.includes("SUPPORTED_VIDEO_EXTENSIONS")) {
-  throw new Error("Диалог выбора должен использовать единый список поддерживаемых видеоформатов.");
+if (!mainProcess.includes("SUPPORTED_MEDIA_EXTENSIONS") || !mainProcess.includes("identifySpeakers: true")) {
+  throw new Error("Диалог выбора должен поддерживать все медиаформаты, определение участников — включаться автоматически.");
 }
 
 const openAiApi = fs.readFileSync(path.join(root, "src/core/openai-api.cjs"), "utf8");

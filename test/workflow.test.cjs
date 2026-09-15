@@ -7,6 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   SUPPORTED_VIDEO_EXTENSIONS,
+  SUPPORTED_MEDIA_EXTENSIONS,
+  isSupportedMediaPath,
   isSupportedVideoPath,
   runMeetingWorkflow,
   validateInputs
@@ -30,18 +32,44 @@ function fakeSplitAudio() {
   };
 }
 
-test("поддерживаются MOV и другие популярные видеоформаты", async (t) => {
+test("аудио использует контекст без кадров; смешанный набор сохраняет номера видеофрагментов", async (t) => {
+  for (const mixed of [false, true]) {
+    const paths = await fixture(t);
+    const audioPath = path.join(path.dirname(paths.videoPath), "01 запись.mp3");
+    await fs.writeFile(audioPath, "fake mp3");
+    let frameCalls = 0, contextCalls = 0;
+    const result = await runMeetingWorkflow({
+      videoPaths: mixed ? [paths.videoPath, audioPath] : [audioPath], outputDirectory: paths.outputDirectory, apiKey: "not-used",
+      dependencies: {
+        splitAudio: fakeSplitAudio(),
+        transcribeAudioFile: async () => ({ text: "Меня зовут Мария.", segments: [{ speaker: "A", start: 0, end: 5, text: "Меня зовут Мария." }, { speaker: "A", start: 10, end: 15, text: "Я веду продажи." }] }),
+        extractSpeakerFrames: async ({ samples }) => { frameCalls++; assert.ok(mixed); assert.ok(samples.every(sample => sample.partIndex === 1)); return []; },
+        identifySpeakersFromFrames: async () => [],
+        identifySpeakersFromContext: async ({ parts }) => {
+          contextCalls++; assert.equal(parts.length, mixed ? 2 : 1);
+          return [{ speaker_key: "0:A", name: "Мария", role: null, role_category: "unknown", confidence: "high", basis: "self_introduction", evidence: [{ segment_id: "p0-s0", quote: "Меня зовут Мария." }] }];
+        },
+        summarizeTranscript: async ({ transcript }) => { assert.match(transcript, /Мария: Меня зовут Мария/); return "Сводка"; }
+      }
+    });
+    assert.equal(frameCalls, mixed ? 1 : 0); assert.equal(contextCalls, 1);
+    assert.equal(result.identifiedSpeakerCount, 1);
+  }
+});
+
+test("поддерживаются популярные видео- и аудиоформаты, включая MOV и MP3", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "meeting-formats-test-"));
   const outputDirectory = path.join(directory, "result");
   await fs.mkdir(outputDirectory);
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
 
   const videoPaths = [];
-  for (const extension of SUPPORTED_VIDEO_EXTENSIONS) {
+  for (const extension of SUPPORTED_MEDIA_EXTENSIONS) {
     const videoPath = path.join(directory, `recording${extension.toUpperCase()}`);
     await fs.writeFile(videoPath, `fake ${extension}`);
     videoPaths.push(videoPath);
-    assert.equal(isSupportedVideoPath(videoPath), true);
+    assert.equal(isSupportedMediaPath(videoPath), true);
+    assert.equal(isSupportedVideoPath(videoPath), SUPPORTED_VIDEO_EXTENSIONS.includes(extension));
   }
 
   const validatedPaths = await validateInputs(videoPaths, outputDirectory);
@@ -144,6 +172,7 @@ test("рабочий процесс подставляет подтверждё�
           confidence: "high"
         }));
       },
+      identifySpeakersFromContext: async () => [],
       summarizeTranscript: async ({ transcript, fetchImpl }) => {
         assert.equal(fetchImpl, systemFetch);
         assert.match(transcript, /Максим: Первое сообщение/);
@@ -152,7 +181,7 @@ test("рабочий процесс подставляет подтверждё�
     }
   });
   assert.equal(result.identifiedSpeakerCount, 1);
-  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /Имена, определённые по видео: Максим/);
+  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /Определённые участники: Максим/);
 });
 
 test("сбой необязательного анализа кадров не мешает создать оба TXT", async (t) => {
@@ -167,6 +196,7 @@ test("сбой необязательного анализа кадров не �
         segments: [{ start: 0, end: 5, speaker: "A", text: "Текст" }]
       }),
       extractSpeakerFrames: async () => { throw new Error("vision unavailable"); },
+      identifySpeakersFromContext: async () => { throw new Error("context unavailable"); },
       summarizeTranscript: async () => "КРАТКОЕ РЕЗЮМЕ\nТекст."
     }
   });
