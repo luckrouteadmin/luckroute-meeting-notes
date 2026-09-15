@@ -7,7 +7,7 @@ const path = require("node:path");
 const CHECKPOINT_FORMAT = 1;
 const CHECKPOINT_NAMESPACE = "meeting-notes-transcription-v1";
 
-async function fingerprintVideos(videoPaths) {
+async function fingerprintVideos(videoPaths, configuration = {}) {
   const files = [];
   for (const filePath of videoPaths) {
     const stat = await fs.stat(filePath);
@@ -19,7 +19,7 @@ async function fingerprintVideos(videoPaths) {
   }
   return crypto
     .createHash("sha256")
-    .update(JSON.stringify({ namespace: CHECKPOINT_NAMESPACE, files }))
+    .update(JSON.stringify({ namespace: CHECKPOINT_NAMESPACE, files, configuration }))
     .digest("hex");
 }
 
@@ -58,7 +58,7 @@ async function atomicWriteJson(filePath, value) {
   await fs.rename(temporary, filePath);
 }
 
-async function openCheckpoint({ directory, videoPaths }) {
+async function openCheckpoint({ directory, videoPaths, configuration = {} }) {
   if (!directory) {
     const memory = {};
     return {
@@ -69,7 +69,7 @@ async function openCheckpoint({ directory, videoPaths }) {
     };
   }
 
-  const checkpointId = await fingerprintVideos(videoPaths);
+  const checkpointId = await fingerprintVideos(videoPaths, configuration);
   const filePath = path.join(directory, `${checkpointId}.json`);
   const transcriptions = await readCheckpoint(filePath, checkpointId);
   let savedPartCount = Object.keys(transcriptions).length;

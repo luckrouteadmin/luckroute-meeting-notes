@@ -108,13 +108,17 @@ function formatTranscriptUtterances(utterances, {
   sourceNames,
   title,
   createdAt = new Date(),
-  locale = "ru"
+  locale = "ru",
+  mode = "openai"
 }) {
   const identifiedNames = [...new Set(utterances
     .map((utterance) => normalizeText(utterance.identifiedName))
     .filter(Boolean))];
   const header = [
     translate(locale, "fullTranscriptTitle"),
+    ...(mode === "local" ? [locale === "en"
+      ? "Processed locally. Voices and participant names are not identified. “Speaker” is a generic label, not a single person."
+      : "Обработано локально. Голоса и имена участников не определяются. «Спикер» — общая метка, а не один человек."] : []),
     ...(title ? [translate(locale, "titleLabel", { title })] : []),
     ...sourceHeader(sourceNames, locale),
     translate(locale, "createdLabel", {

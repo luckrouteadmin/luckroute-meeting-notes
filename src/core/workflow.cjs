@@ -135,12 +135,25 @@ async function runMeetingWorkflow({
   identifySpeakers = true,
   splitMeetings = false,
   locale = "ru",
+  mode = "openai",
+  localEngine,
   checkpointDirectory,
   signal,
   fetchImpl,
   onProgress = () => {},
   dependencies = {}
 }) {
+  if (!["local", "openai"].includes(mode)) throw new Error("Invalid processing mode");
+  if (mode === "local") {
+    for (const method of ["splitAudio", "transcribeAudioFile", "summarizeTranscript", "detectMeetingBoundaries"]) {
+      if (typeof localEngine?.[method] !== "function") throw new Error("Local engine is not ready");
+    }
+    // Explicitly sever all cloud capabilities, including optional video analysis.
+    dependencies = { ...dependencies, ...localEngine };
+    identifySpeakers = false;
+    apiKey = undefined;
+    fetchImpl = undefined;
+  }
   const normalizedLocale = normalizeLocale(locale);
   const normalizedVideoPaths = await validateInputs(
     videoPaths,
@@ -172,7 +185,8 @@ async function runMeetingWorkflow({
     try {
       checkpoint = await openCheckpointImpl({
         directory: checkpointDirectory,
-        videoPaths: normalizedVideoPaths
+        videoPaths: normalizedVideoPaths,
+        configuration: { mode, locale: normalizedLocale, model: mode === "local" ? "whisper-small-v1" : "gpt-4o-transcribe-diarize" }
       });
     } catch {
       checkpoint = createMemoryCheckpoint();
@@ -388,7 +402,8 @@ async function runMeetingWorkflow({
         sourceNames,
         title,
         createdAt,
-        locale: normalizedLocale
+        locale: normalizedLocale,
+        mode
       });
       await atomicWriteText(outputPairs[index].transcriptPath, transcript);
       createdFiles.push(outputPairs[index].transcriptPath);
@@ -462,6 +477,7 @@ async function runMeetingWorkflow({
       identifiedSpeakerCount,
       splitDetectionSkipped,
       locale: normalizedLocale,
+      mode,
       outputDirectory
     };
   } catch (error) {

@@ -37,6 +37,17 @@ jobs:
         run: npm run check
       - name: Run tests
         run: npm test
+      - name: Verify Electron interface
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node scripts/test-ui.cjs
+      - name: Save UI screenshots
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: UI-check
+          path: ui-check/*.png
+      - name: Build and verify offline engines
+        run: npm run build:local
 
   dependency-review:
     name: Dependency review

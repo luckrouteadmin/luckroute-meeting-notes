@@ -19,8 +19,14 @@ const requiredFiles = [
   "src/core/video.cjs",
   "src/core/prompt.cjs",
   "src/core/locale.cjs",
+  "src/core/local-engine.cjs",
+  "src/core/local-models.cjs",
+  "src/core/local-process.cjs",
+  "scripts/build-local-engines.cjs",
+  "src/ui/luckroute.svg",
   "scripts/mac-adhoc-sign.cjs",
   "build/entitlements.mac.plist",
+  "build/native-utf8.manifest",
   "build/icon.png",
   "build/icon.ico",
   ".github/workflows/build-installers.yml",
@@ -42,7 +48,7 @@ const javascriptFiles = [];
 function collect(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const fullPath = path.join(directory, entry.name);
-    if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== "dist") collect(fullPath);
+    if (entry.isDirectory() && !["node_modules", "dist", ".native-cache", "resources", ".git"].includes(entry.name)) collect(fullPath);
     if (entry.isFile() && /\.(?:cjs|js)$/.test(entry.name)) javascriptFiles.push(fullPath);
   }
 }
@@ -61,8 +67,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.2.3") {
-  throw new Error("Версия сборки должна быть 1.2.3.");
+if (packageJson.version !== "1.3.0") {
+  throw new Error("Версия сборки должна быть 1.3.0.");
 }
 
 const lockJson = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
