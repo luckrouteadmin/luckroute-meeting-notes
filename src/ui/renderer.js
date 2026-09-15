@@ -12,8 +12,23 @@ const COPY = Object.freeze({
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Сводка созвона",
     subtitle: "Из видеозаписей — в полную расшифровку и содержательную деловую сводку",
-    keyNoticeTitle: "Нужна однократная настройка",
-    keyNoticeText: "Сохраните API-ключ OpenAI — после этого останутся выбор файлов и один запуск.",
+    keyNoticeTitle: "OpenAI заблокирован без ключа",
+    keyNoticeText: "Локальный режим доступен без ключа. Добавьте свой API-ключ, если хотите включить облачную обработку.",
+    modeMeta: "ЛОКАЛЬНО / OPENAI",
+    modeHeading: "Режим обработки",
+    localMode: "На компьютере",
+    cloudLocked: "OpenAI заблокирован. Добавьте API-ключ в настройках.",
+    localDescription: "Расшифровка и сводка создаются на вашем компьютере. После установки моделей интернет не нужен; записи, текст и кадры никуда не отправляются.",
+    cloudDescription: "Аудио и текст отправляются в OpenAI. При определении имён отправляются также отдельные кадры. Нужен интернет; использование оплачивается по вашему API-ключу.",
+    localNames: "Доступно только в OpenAI. Локальный режим пока не различает голоса и не определяет имена по видео.",
+    modelRequirements: "Whisper + Qwen3 · загрузка около 3 ГБ с Hugging Face · рекомендуется 8 ГБ ОЗУ, лучше 16 ГБ. Скорость и качество зависят от компьютера; сводка может уступать OpenAI.",
+    downloadModels: "Скачать модели",
+    pauseDownload: "Приостановить",
+    modelsNeeded: "Один раз установите локальные модели",
+    modelsReady: "Всё готово для работы без интернета",
+    modelsDownloading: "Загрузка моделей: {percent}%",
+    modelsVerifying: "Проверяю целостность моделей…",
+    modeError: "Не удалось переключить режим.",
     configure: "Настроить",
     workspaceEyebrow: "НОВАЯ ОБРАБОТКА",
     workspaceTitle: "Подготовьте материалы",
@@ -78,8 +93,23 @@ const COPY = Object.freeze({
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Meeting Notes",
     subtitle: "Turn video recordings into a full transcript and a substantive business summary",
-    keyNoticeTitle: "One-time setup required",
-    keyNoticeText: "Save your OpenAI API key once, then simply select files and start.",
+    keyNoticeTitle: "OpenAI is locked without a key",
+    keyNoticeText: "Local mode works without a key. Add your API key if you want to enable cloud processing.",
+    modeMeta: "LOCAL / OPENAI",
+    modeHeading: "Processing mode",
+    localMode: "On this computer",
+    cloudLocked: "OpenAI is locked. Add an API key in settings.",
+    localDescription: "Transcripts and summaries are created on your computer. Once models are installed, no internet is needed. Recordings, text and frames never leave this device.",
+    cloudDescription: "Audio and text are sent to OpenAI, along with selected frames if name identification is enabled. Requires internet; charges apply to your API key.",
+    localNames: "OpenAI only. Local mode does not yet distinguish voices or identify names from video.",
+    modelRequirements: "Whisper + Qwen3 · about 3 GB downloaded from Hugging Face · 8 GB RAM recommended, preferably 16 GB. Speed depends on your computer; summaries may be less capable than OpenAI.",
+    downloadModels: "Download models",
+    pauseDownload: "Pause download",
+    modelsNeeded: "Install local models once",
+    modelsReady: "Ready to work offline",
+    modelsDownloading: "Downloading models: {percent}%",
+    modelsVerifying: "Verifying model integrity…",
+    modeError: "Could not switch processing mode.",
     configure: "Set up",
     workspaceEyebrow: "NEW PROCESSING JOB",
     workspaceTitle: "Prepare your files",
@@ -138,6 +168,16 @@ const COPY = Object.freeze({
 });
 
 const elements = {
+  localModeButton: document.querySelector("#localModeButton"),
+  openaiModeButton: document.querySelector("#openaiModeButton"),
+  cloudLock: document.querySelector("#cloudLock"),
+  modeDescription: document.querySelector("#modeDescription"),
+  modelSetup: document.querySelector("#modelSetup"),
+  modelStatus: document.querySelector("#modelStatus"),
+  downloadModelsButton: document.querySelector("#downloadModelsButton"),
+  cancelDownloadButton: document.querySelector("#cancelDownloadButton"),
+  modelDownloadProgress: document.querySelector("#modelDownloadProgress"),
+  identifyNamesDescription: document.querySelector("#identifyNamesDescription"),
   keyNotice: document.querySelector("#keyNotice"),
   languageButtons: [...document.querySelectorAll("#languageSwitch [data-locale]")],
   settingsButton: document.querySelector("#settingsButton"),
@@ -176,6 +216,10 @@ const elements = {
 };
 
 const state = {
+  mode: "local",
+  modelsReady: false,
+  downloading: false,
+  switchingMode: false,
   locale: "ru",
   version: "",
   videoPaths: [],
@@ -265,13 +309,32 @@ function stopElapsedTimer() {
 }
 
 function updateControls() {
-  elements.startButton.disabled = state.running || state.videoPaths.length === 0 || !state.outputDirectory;
-  elements.chooseVideoButton.disabled = state.running;
-  elements.chooseOutputButton.disabled = state.running;
-  elements.identifySpeakersCheckbox.disabled = state.running;
-  elements.splitMeetingsCheckbox.disabled = state.running;
-  elements.settingsButton.disabled = state.running;
-  for (const button of elements.languageButtons) button.disabled = state.running;
+  const busy = state.running || state.downloading || state.switchingMode;
+  const local = state.mode === "local";
+  elements.startButton.disabled = busy || state.videoPaths.length === 0 || !state.outputDirectory || (local && !state.modelsReady);
+  elements.chooseVideoButton.disabled = busy;
+  elements.chooseOutputButton.disabled = busy;
+  elements.identifySpeakersCheckbox.disabled = busy || local;
+  elements.identifySpeakersCheckbox.closest("label").classList.toggle("unavailable", local);
+  elements.identifyNamesDescription.textContent = t(local ? "localNames" : "identifyNamesText");
+  elements.splitMeetingsCheckbox.disabled = busy;
+  elements.settingsButton.disabled = busy;
+  elements.noticeSettingsButton.disabled = busy;
+  for (const button of elements.languageButtons) button.disabled = busy;
+  elements.localModeButton.disabled = busy;
+  elements.openaiModeButton.disabled = busy || !state.hasApiKey;
+  elements.openaiModeButton.title = state.hasApiKey ? "OpenAI" : t("cloudLocked");
+  elements.openaiModeButton.setAttribute("aria-label", elements.openaiModeButton.title);
+  elements.cloudLock.hidden = state.hasApiKey;
+  elements.localModeButton.setAttribute("aria-pressed", String(local));
+  elements.openaiModeButton.setAttribute("aria-pressed", String(!local));
+  elements.modeDescription.textContent = t(local ? "localDescription" : "cloudDescription");
+  elements.modelSetup.hidden = !local;
+  elements.downloadModelsButton.hidden = state.downloading || state.modelsReady;
+  elements.downloadModelsButton.disabled = busy;
+  elements.cancelDownloadButton.hidden = !state.downloading;
+  elements.modelDownloadProgress.hidden = !state.downloading;
+  if (!state.downloading) elements.modelStatus.textContent = t(state.modelsReady ? "modelsReady" : "modelsNeeded");
   elements.cancelButton.hidden = !state.running;
   elements.keyNotice.hidden = state.hasApiKey;
   elements.deleteKeyButton.hidden = !state.hasApiKey;
@@ -333,6 +396,7 @@ function applyLocale() {
     elements.settingsStatus.textContent = t(state.settingsStatusKey);
   }
   renderResult();
+  updateControls();
 }
 
 function hideMessages() {
@@ -363,6 +427,41 @@ function openSettings() {
 function closeSettings() {
   elements.settingsDialog.close();
 }
+
+async function switchMode(mode) {
+  if (state.running || state.downloading || state.switchingMode || (mode === "openai" && !state.hasApiKey)) return;
+  state.switchingMode = true;
+  updateControls();
+  try {
+    const result = await api.setMode(mode);
+    if (!result?.ok) throw new Error();
+    state.mode = result.mode;
+    hideMessages();
+  } catch { showError(t("modeError")); }
+  finally { state.switchingMode = false; updateControls(); }
+}
+elements.localModeButton.addEventListener("click", () => switchMode("local"));
+elements.openaiModeButton.addEventListener("click", () => switchMode("openai"));
+elements.downloadModelsButton.addEventListener("click", async () => {
+  if (state.running || state.downloading) return;
+  hideMessages();
+  state.downloading = true;
+  elements.modelStatus.textContent = t("modelsDownloading", { percent: 0 });
+  elements.modelDownloadProgress.value = 0;
+  updateControls();
+  try {
+    const result = await api.downloadModels();
+    if (result.ok) state.modelsReady = result.localModels.ready;
+    else if (result.code !== "CANCELLED") showError(result.error || t("ipcError"));
+  } catch { showError(t("ipcError")); }
+  finally { state.downloading = false; updateControls(); }
+});
+elements.cancelDownloadButton.addEventListener("click", () => api.cancelDownload());
+api.onDownloadProgress((progress) => {
+  const percent = Math.min(100, Math.floor((progress.downloaded / Math.max(1, progress.total)) * 100));
+  elements.modelDownloadProgress.value = percent;
+  elements.modelStatus.textContent = progress.verifying ? t("modelsVerifying") : t("modelsDownloading", { percent });
+});
 
 for (const button of elements.languageButtons) {
   button.addEventListener("click", async () => {
@@ -428,6 +527,7 @@ elements.settingsForm.addEventListener("submit", async (event) => {
 elements.deleteKeyButton.addEventListener("click", async () => {
   await api.deleteApiKey();
   state.hasApiKey = false;
+  state.mode = "local";
   state.settingsStatusKey = "keyDeleted";
   elements.settingsStatus.style.color = "#47751b";
   elements.settingsStatus.textContent = t("keyDeleted");
@@ -436,7 +536,7 @@ elements.deleteKeyButton.addEventListener("click", async () => {
 
 elements.startButton.addEventListener("click", async () => {
   hideMessages();
-  if (!state.hasApiKey) {
+  if (state.mode === "openai" && !state.hasApiKey) {
     openSettings();
     return;
   }
@@ -454,8 +554,9 @@ elements.startButton.addEventListener("click", async () => {
   try {
     result = await api.start({
       videoPaths: state.videoPaths,
+      mode: state.mode,
       outputDirectory: state.outputDirectory,
-      identifySpeakers: elements.identifySpeakersCheckbox.checked,
+      identifySpeakers: state.mode === "openai" && elements.identifySpeakersCheckbox.checked,
       splitMeetings: elements.splitMeetingsCheckbox.checked,
       locale: state.locale
     });
@@ -471,8 +572,10 @@ elements.startButton.addEventListener("click", async () => {
   if (!result.ok) {
     if (result.code === "API_KEY_REQUIRED" || result.code === "INVALID_API_KEY") {
       state.hasApiKey = false;
+      state.mode = "local";
       updateControls();
     }
+    if (result.code === "LOCAL_MODELS_REQUIRED") { state.modelsReady = false; updateControls(); }
     if (result.code !== "CANCELLED") showError(result.error, result.logPath);
     const createdFiles = Array.isArray(result.createdFiles) ? result.createdFiles : [];
     if (result.transcriptPath || createdFiles.length > 0) {
@@ -515,6 +618,8 @@ async function initialize() {
   state.locale = initial.locale === "en" ? "en" : "ru";
   state.version = initial.version || "";
   state.hasApiKey = initial.hasApiKey;
+  state.mode = initial.hasApiKey && initial.mode === "openai" ? "openai" : "local";
+  state.modelsReady = Boolean(initial.localModels?.ready);
   applyLocale();
   updateControls();
 }

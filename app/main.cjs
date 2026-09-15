@@ -19,6 +19,8 @@ const {
 } = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
 const { normalizeLocale, translate } = require("../src/core/locale.cjs");
+const { createLocalEngine } = require("../src/core/local-engine.cjs");
+const { downloadModels, getModelStatus } = require("../src/core/local-models.cjs");
 
 const SETTINGS_FILE = "settings.json";
 const LOG_FILE = "meeting-notes.log";
@@ -27,6 +29,24 @@ const VIDEO_DIALOG_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS.map((extension) => ex
 const VIDEO_COLLATOR = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 let mainWindow = null;
 let activeJob = null;
+let modelDownload = null;
+let settingsQueue = Promise.resolve();
+
+function modelDirectory() { return path.join(app.getPath("userData"), "models"); }
+function binaryDirectory() {
+  const root = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..", "resources");
+  return path.join(root, "local", `${process.platform}-${process.arch}`);
+}
+
+function updateSettings(change) {
+  const operation = settingsQueue.then(async () => {
+    const settings = await readSettings();
+    change(settings);
+    await writeSettings(settings);
+  });
+  settingsQueue = operation.catch(() => {});
+  return operation;
+}
 
 function createWindow(locale = "ru") {
   mainWindow = new BrowserWindow({
@@ -36,7 +56,7 @@ function createWindow(locale = "ru") {
     minHeight: 760,
     show: false,
     title: translate(locale, "appTitle"),
-    backgroundColor: "#11170f",
+    backgroundColor: "#f3f9fc",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -52,6 +72,7 @@ function createWindow(locale = "ru") {
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("closed", () => {
     activeJob?.controller.abort();
+    modelDownload?.abort();
     mainWindow = null;
   });
 }
@@ -125,9 +146,7 @@ async function getPreferredLocale() {
 
 async function saveLocale(value) {
   const locale = normalizeLocale(value);
-  const settings = await readSettings();
-  settings.locale = locale;
-  await writeSettings(settings);
+  await updateSettings((settings) => { settings.locale = locale; });
   mainWindow?.setTitle(translate(locale, "appTitle"));
   return locale;
 }
@@ -150,15 +169,12 @@ async function saveApiKey(value, locale = "ru") {
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error(translate(locale, "secureStorageUnavailable"));
   }
-  const settings = await readSettings();
-  settings.apiKey = safeStorage.encryptString(apiKey).toString("base64");
-  await writeSettings(settings);
+  const encrypted = safeStorage.encryptString(apiKey).toString("base64");
+  await updateSettings((settings) => { settings.apiKey = encrypted; });
 }
 
 async function deleteApiKey() {
-  const settings = await readSettings();
-  delete settings.apiKey;
-  await writeSettings(settings);
+  await updateSettings((settings) => { delete settings.apiKey; settings.mode = "local"; });
 }
 
 function sendProgress(event, progress) {
@@ -177,14 +193,51 @@ function sortVideoPaths(filePaths) {
 function registerIpcHandlers() {
   ipcMain.handle("app:get-state", async () => {
     const locale = await getPreferredLocale();
+    const hasApiKey = Boolean(await getApiKey());
+    const settings = await readSettings();
     return {
       version: app.getVersion(),
-      hasApiKey: Boolean(await getApiKey()),
+      hasApiKey,
+      mode: hasApiKey && settings.mode === "openai" ? "openai" : "local",
+      localModels: await getModelStatus(modelDirectory()),
       platform: process.platform,
       locale,
       developer: "Luckroute IT department"
     };
   });
+
+  ipcMain.handle("settings:set-mode", async (_event, mode) => {
+    if (activeJob || modelDownload || !["local", "openai"].includes(mode)) return { ok: false };
+    if (mode === "openai" && !await getApiKey()) return { ok: false, code: "API_KEY_REQUIRED" };
+    await updateSettings((settings) => { settings.mode = mode; });
+    return { ok: true, mode };
+  });
+
+  ipcMain.handle("local:download-models", async (event) => {
+    if (activeJob || modelDownload) return { ok: false, code: "BUSY" };
+    const controller = new AbortController();
+    modelDownload = controller;
+    let powerId;
+    const locale = await getPreferredLocale();
+    try {
+      powerId = powerSaveBlocker.start("prevent-app-suspension");
+      const status = await downloadModels({
+        directory: modelDirectory(), locale, signal: controller.signal,
+        fetchImpl: (input, init) => net.fetch(input, init),
+        onProgress: (progress) => {
+          if (!event.sender.isDestroyed()) event.sender.send("local:download-progress", progress);
+        }
+      });
+      return { ok: true, localModels: status };
+    } catch (error) {
+      const userError = toUserError(controller.signal.aborted ? new CancelledError(undefined, locale) : error, locale);
+      return { ok: false, code: userError.code, error: userError.message };
+    } finally {
+      if (Number.isInteger(powerId) && powerSaveBlocker.isStarted(powerId)) powerSaveBlocker.stop(powerId);
+      modelDownload = null;
+    }
+  });
+  ipcMain.handle("local:cancel-download", () => { modelDownload?.abort(); return { ok: true }; });
 
   ipcMain.handle("dialog:choose-video", async () => {
     const locale = await getPreferredLocale();
@@ -230,17 +283,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle("workflow:start", async (event, options) => {
     const locale = normalizeLocale(options?.locale || await getPreferredLocale());
-    if (activeJob) {
+    if (activeJob || modelDownload) {
       return { ok: false, error: translate(locale, "jobAlreadyRunning") };
-    }
-
-    const apiKey = await getApiKey();
-    if (!apiKey) {
-      return {
-        ok: false,
-        code: "API_KEY_REQUIRED",
-        error: translate(locale, "apiKeyRequired")
-      };
     }
 
     const controller = new AbortController();
@@ -251,6 +295,7 @@ function registerIpcHandlers() {
       powerBlockerId = null;
     }
     activeJob = { controller, powerBlockerId, locale };
+    const mode = options?.mode === "openai" ? "openai" : "local";
 
     const sourceNames = Array.isArray(options?.videoPaths)
       ? options.videoPaths.map((filePath) => path.basename(String(filePath)))
@@ -260,21 +305,34 @@ function registerIpcHandlers() {
       platform: process.platform,
       sourceFiles: sourceNames,
       locale,
-      identifySpeakers: options?.identifySpeakers !== false,
+      mode,
+      identifySpeakers: mode === "openai" && options?.identifySpeakers !== false,
       splitMeetings: options?.splitMeetings === true
     }).catch(() => {});
 
     try {
+      const apiKey = mode === "openai" ? await getApiKey() : undefined;
+      if (mode === "openai" && !apiKey) {
+        throw Object.assign(new Error(translate(locale, "apiKeyRequired")), { code: "API_KEY_REQUIRED" });
+      }
+      let localEngine;
+      if (mode === "local") {
+        sendProgress(event, { stage: "local-verify", percent: 1,
+          message: locale === "en" ? "Checking local models…" : "Проверяю локальные модели…" });
+        localEngine = await createLocalEngine({ modelDirectory: modelDirectory(), binaryDirectory: binaryDirectory(), locale, signal: controller.signal });
+      }
       const result = await runMeetingWorkflow({
         videoPaths: options?.videoPaths,
         outputDirectory: options?.outputDirectory,
         identifySpeakers: options?.identifySpeakers !== false,
         splitMeetings: options?.splitMeetings === true,
         locale,
+        mode,
+        localEngine,
         checkpointDirectory: path.join(app.getPath("userData"), "checkpoints"),
         apiKey,
         signal: controller.signal,
-        fetchImpl: (input, init) => net.fetch(input, init),
+        fetchImpl: mode === "openai" ? (input, init) => net.fetch(input, init) : undefined,
         onProgress: (progress) => {
           sendProgress(event, progress);
           void appendDiagnosticLog("progress", {

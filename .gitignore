@@ -1,6 +1,8 @@
 node_modules/
+.native-cache/
+resources/local/
+ui-check/
 dist/
 *.log
 .DS_Store
 coverage/
-

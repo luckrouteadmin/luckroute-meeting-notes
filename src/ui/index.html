@@ -13,11 +13,9 @@
       <header class="brand-hero">
         <div class="hero-topline">
           <div class="brand-lockup">
-            <div class="brand-mark" aria-hidden="true">
-              <span></span><span></span><span></span>
-            </div>
+            <img class="brand-mark" src="luckroute.svg" alt="Luckroute">
             <div>
-              <p class="brand-name">LUCKROUTE</p>
+              <p class="brand-name">Luckroute IT department</p>
               <p class="brand-unit" data-i18n="brandUnit">AI WORKSPACE</p>
             </div>
           </div>
@@ -45,7 +43,7 @@
         <div class="hero-meta" aria-hidden="true">
           <span>MP4 · MOV · MKV · AVI · WEBM</span>
           <span class="meta-dot"></span>
-          <span>OPENAI</span>
+          <span data-i18n="modeMeta">ЛОКАЛЬНО / OPENAI</span>
         </div>
       </header>
 
@@ -58,6 +56,21 @@
       </section>
 
       <section class="workspace-panel">
+        <section class="mode-panel" aria-labelledby="modeHeading">
+          <div class="mode-heading"><h2 id="modeHeading" data-i18n="modeHeading">Режим обработки</h2>
+            <div id="modeSwitch" class="mode-switch" role="group" data-i18n-aria="modeHeading">
+              <button id="localModeButton" type="button" aria-pressed="true" data-i18n="localMode">На компьютере</button>
+              <button id="openaiModeButton" type="button" aria-pressed="false"><svg id="cloudLock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg><span>OpenAI</span></button>
+            </div>
+          </div>
+          <p id="modeDescription" class="mode-description"></p>
+          <div id="modelSetup" class="model-setup">
+            <div><strong id="modelStatus"></strong><p data-i18n="modelRequirements">Whisper + Qwen3 · около 3 ГБ на диске · рекомендуется 8 ГБ ОЗУ или больше</p></div>
+            <button id="downloadModelsButton" class="secondary-button" type="button" data-i18n="downloadModels">Скачать модели</button>
+            <button id="cancelDownloadButton" class="secondary-button" type="button" hidden data-i18n="pauseDownload">Приостановить</button>
+            <progress id="modelDownloadProgress" max="100" value="0" hidden></progress>
+          </div>
+        </section>
         <div class="panel-heading">
           <div>
             <p class="eyebrow panel-eyebrow" data-i18n="workspaceEyebrow">НОВАЯ ОБРАБОТКА</p>
@@ -91,7 +104,7 @@
             <input id="identifySpeakersCheckbox" type="checkbox" checked>
             <span>
               <strong data-i18n="identifyNamesTitle">Определять имена участников по видео</strong>
-              <small data-i18n="identifyNamesText">Программа сверит несколько кадров и использует имя только при устойчивом совпадении подписи с индикатором речи.</small>
+              <small id="identifyNamesDescription" data-i18n="identifyNamesText">Программа сверит несколько кадров и использует имя только при устойчивом совпадении подписи с индикатором речи.</small>
             </span>
           </label>
 
