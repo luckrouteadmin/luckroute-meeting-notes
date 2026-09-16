@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { transcriptRows, splitRows, parseNotes, renderNotes, summarizeLocalNotes } = require("../src/core/local-notes.cjs");
+const { transcriptRows, splitRows, parseNotes, renderNotes, summarizeLocalNotes, applyCorrections } = require("../src/core/local-notes.cjs");
 const item = (id, text, kind = "discussion", topic = "Project") => ({ kind, topic, text, source_ids: [id], owner: null });
 
 test("local analysis preserves complete input and bounds long utterances in UTF-8", () => {
@@ -17,6 +17,7 @@ test("multi-part facts reach the final summary without an LLM compression stage"
   const transcript = Array.from({ length: 72 }, (_, i) => `[00:${String(i).padStart(2, "0")}:00–00:${String(i).padStart(2, "0")}:59] Спикер: Topic ${i + 1}: ${"A source fact. ".repeat(25)}`).join("\n");
   let calls = 0;
   const summary = await summarizeLocalNotes({ transcript, summaryDetail: "detailed", locale: "en", generate: async (_instructions, input, options) => {
+    if (JSON.parse(input).notes) return '{"corrections":[]}';
     calls++;
     assert.equal(options.schema.type, "object");
     const rows = JSON.parse(input).lines;
@@ -30,6 +31,7 @@ test("multi-part facts reach the final summary without an LLM compression stage"
 test("invalid or empty fragment output is retried on smaller inputs, never silently skipped", async () => {
   let calls = 0;
   const summary = await summarizeLocalNotes({ transcript: "First fact.\nLast fact.", generate: async (_instructions, input) => {
+    if (JSON.parse(input).notes) return '{"corrections":[]}';
     calls++;
     const rows = JSON.parse(input).lines;
     return rows.length > 1 ? '{"items":[]}' : JSON.stringify({ items: [item(rows[0].id, rows[0].text)] });
@@ -61,4 +63,25 @@ test("cancellation after generation prevents publishing a partial local result",
   await assert.rejects(summarizeLocalNotes({ transcript: "Fact.", signal: controller.signal, generate: async () => {
     controller.abort(); return JSON.stringify({ items: [item(1, "Fact.")] });
   } }), { code: "CANCELLED" });
+});
+
+test("source review corrects a condition and preserves unrelated facts", () => {
+  const rows = [{ id: 1, text: "Order 300 if delivery is on time, otherwise 100." }, { id: 2, text: "Alex will request the invoice." }];
+  const notes = parseNotes(JSON.stringify({ items: [item(1, "Order 300 if late.", "decision"), item(2, "Request the invoice.", "task")] }), rows);
+  const corrections = { corrections: [{ item_id: 1, replacement: item(1, rows[0].text, "decision") }] };
+  const corrected = applyCorrections(JSON.stringify(corrections), notes, rows);
+  assert.equal(corrected[0].text, rows[0].text);
+  assert.deepEqual(corrected[1], notes[1]);
+  assert.throws(() => applyCorrections('{"corrections":[{"item_id":3,"replacement":null}]}', notes, rows));
+  assert.throws(() => applyCorrections(JSON.stringify({ corrections: [{ item_id: 1, replacement: item(999, "Unfounded") }] }), notes, rows));
+});
+
+test("cancelling source review stops output without a fragment retry", async () => {
+  const controller = new AbortController(); let calls = 0;
+  await assert.rejects(summarizeLocalNotes({ transcript: "Fact.", signal: controller.signal, generate: async (_instructions, input) => {
+    calls++;
+    if (JSON.parse(input).notes) { controller.abort(); return '{"corrections":[]}'; }
+    return JSON.stringify({ items: [item(1, "Fact.")] });
+  } }), { code: "CANCELLED" });
+  assert.equal(calls, 2);
 });
