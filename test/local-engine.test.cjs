@@ -109,14 +109,15 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
     const prompt = await fs.readFile(promptFile, "utf8");
     assert.match(prompt, /Ship Monday/);
     summaryRequests.push({ prompt, tokens: Number(args[args.indexOf("-n") + 1]) });
-    return "EXECUTIVE SUMMARY\nShip Monday.";
+    assert.ok(args.includes("--json-schema-file"));
+    return JSON.stringify({ items: [{ kind: "decision", topic: "Release", text: "Ship Monday.", source_ids: [1], owner: null }] });
   } });
   const transcription = await engine.transcribeAudioFile({ filePath: path.join(directory, "test.wav") });
   assert.equal(transcription.text, "Ship Monday");
   assert.match(await engine.summarizeTranscript({ transcript: "Ship Monday", summaryDetail: "brief" }), /Ship Monday/);
-  assert.match(summaryRequests.at(-1).prompt, /Selected detail level — Brief:/);
+  assert.match(summaryRequests.at(-1).prompt, /Keep each fact concise/);
   assert.ok(summaryRequests.at(-1).tokens >= 1400);
   await engine.summarizeTranscript({ transcript: "Ship Monday", summaryDetail: "detailed" });
-  assert.match(summaryRequests.at(-1).prompt, /Selected detail level — Detailed:/);
+  assert.match(summaryRequests.at(-1).prompt, /Include technical details/);
   await assert.rejects(fs.stat(promptFile), { code: "ENOENT" });
 });
