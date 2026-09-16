@@ -22,7 +22,7 @@ app.whenReady().then(async () => {
   const click = async (id) => { await execute(`document.getElementById(${JSON.stringify(id)}).click()`); };
   try {
     await window.loadFile(path.join(__dirname, "../src/ui/index.html"));
-    await waitFor("document.querySelector('#versionLabel').textContent.includes('1.3.1')");
+    await waitFor("document.querySelector('#versionLabel').textContent.includes('1.3.2')");
     assert.equal(await execute("document.querySelector('#openaiModeButton').disabled"), true);
     assert.notEqual(await execute("getComputedStyle(document.querySelector('#cloudLock')).display"), "none");
     assert.equal(await execute("document.querySelector('#identifySpeakersCheckbox') === null"), true);
