@@ -16,6 +16,12 @@ const COPY = Object.freeze({
     keyNoticeText: "Локальный режим доступен без ключа. Добавьте свой API-ключ, если хотите включить облачную обработку.",
     modeMeta: "ЛОКАЛЬНО / OPENAI",
     modeHeading: "Режим обработки",
+    detailHeading: "Подробность сводки",
+    detailBrief: "Краткая",
+    detailStandard: "Обычная",
+    detailDetailed: "Подробная",
+    detailHint: "{range} символов для 45–60 минут. Объём зависит от длительности и содержания разговора.",
+    detailError: "Не удалось сохранить подробность сводки.",
     localMode: "На компьютере",
     cloudLocked: "OpenAI заблокирован. Добавьте API-ключ в настройках.",
     localDescription: "Расшифровка и сводка создаются на вашем компьютере. После установки моделей интернет не нужен; записи, текст и кадры никуда не отправляются.",
@@ -98,6 +104,12 @@ const COPY = Object.freeze({
     keyNoticeText: "Local mode works without a key. Add your API key if you want to enable cloud processing.",
     modeMeta: "LOCAL / OPENAI",
     modeHeading: "Processing mode",
+    detailHeading: "Summary detail",
+    detailBrief: "Brief",
+    detailStandard: "Standard",
+    detailDetailed: "Detailed",
+    detailHint: "{range} characters for 45–60 minutes. Length adapts to the duration and substance of the meeting.",
+    detailError: "Could not save the summary detail setting.",
     localMode: "On this computer",
     cloudLocked: "OpenAI is locked. Add an API key in settings.",
     localDescription: "Transcripts and summaries are created on your computer. Once models are installed, no internet is needed. Recordings, text and frames never leave this device.",
@@ -188,6 +200,9 @@ const elements = {
   chooseOutputButton: document.querySelector("#chooseOutputButton"),
   identityNotice: document.querySelector("#identityNotice"),
   splitMeetingsCheckbox: document.querySelector("#splitMeetingsCheckbox"),
+  summaryDetail: document.querySelector("#summaryDetail"),
+  detailValue: document.querySelector("#detailValue"),
+  detailHint: document.querySelector("#detailHint"),
   videoPath: document.querySelector("#videoPath"),
   videoList: document.querySelector("#videoList"),
   videoOrderHint: document.querySelector("#videoOrderHint"),
@@ -219,6 +234,7 @@ const elements = {
 
 const state = {
   mode: "local",
+  summaryDetail: "standard",
   modelsReady: false,
   downloading: false,
   switchingMode: false,
@@ -318,6 +334,7 @@ function updateControls() {
   elements.chooseOutputButton.disabled = busy;
   elements.identifyNamesDescription.textContent = t(local ? "localNames" : "identifyNamesText");
   elements.splitMeetingsCheckbox.disabled = busy;
+  elements.summaryDetail.disabled = busy;
   elements.settingsButton.disabled = busy;
   elements.noticeSettingsButton.disabled = busy;
   for (const button of elements.languageButtons) button.disabled = busy;
@@ -398,8 +415,30 @@ function applyLocale() {
     elements.settingsStatus.textContent = t(state.settingsStatusKey);
   }
   renderResult();
+  renderDetail();
   updateControls();
 }
+
+const DETAIL_LEVELS = ["brief", "standard", "detailed"];
+function renderDetail() {
+  const index = Math.max(0, DETAIL_LEVELS.indexOf(state.summaryDetail));
+  const label = t(["detailBrief", "detailStandard", "detailDetailed"][index]);
+  elements.summaryDetail.value = String(index);
+  elements.summaryDetail.setAttribute("aria-valuetext", label);
+  elements.detailValue.textContent = label;
+  elements.detailHint.textContent = t("detailHint", { range: ["1 000–3 000", "3 000–10 000", "10 000–30 000"][index] });
+}
+
+elements.summaryDetail.addEventListener("input", () => {
+  state.summaryDetail = DETAIL_LEVELS[Number(elements.summaryDetail.value)] || "standard";
+  renderDetail();
+});
+elements.summaryDetail.addEventListener("change", async () => {
+  try {
+    const result = await api.setSummaryDetail(state.summaryDetail);
+    if (!result.ok) showError(t("detailError"));
+  } catch { showError(t("detailError")); }
+});
 
 function hideMessages() {
   elements.errorMessage.hidden = true;
@@ -559,6 +598,7 @@ elements.startButton.addEventListener("click", async () => {
       mode: state.mode,
       outputDirectory: state.outputDirectory,
       splitMeetings: elements.splitMeetingsCheckbox.checked,
+      summaryDetail: state.summaryDetail,
       locale: state.locale
     });
   } catch {
@@ -621,6 +661,7 @@ async function initialize() {
   state.hasApiKey = initial.hasApiKey;
   state.mode = initial.hasApiKey && initial.mode === "openai" ? "openai" : "local";
   state.modelsReady = Boolean(initial.localModels?.ready);
+  state.summaryDetail = DETAIL_LEVELS.includes(initial.summaryDetail) ? initial.summaryDetail : "standard";
   applyLocale();
   updateControls();
 }

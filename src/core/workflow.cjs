@@ -121,6 +121,7 @@ async function runMeetingWorkflow({
   apiKey,
   identifySpeakers = true,
   splitMeetings = false,
+  summaryDetail = "standard",
   locale = "ru",
   mode = "openai",
   localEngine,
@@ -434,6 +435,7 @@ async function runMeetingWorkflow({
       try {
         summary = await summarizeImpl({
           transcript: transcripts[index],
+          summaryDetail,
           apiKey,
           signal,
           fetchImpl,

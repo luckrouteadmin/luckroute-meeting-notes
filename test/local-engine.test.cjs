@@ -72,12 +72,12 @@ test("local workflow never invokes cloud transcription, summary, boundaries, or 
   await fs.writeFile(video, "fixture");
   const forbidden = () => assert.fail("A cloud capability was called in local mode");
   const result = await runMeetingWorkflow({ videoPaths: [video], outputDirectory: directory,
-    mode: "local", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
+    mode: "local", summaryDetail: "brief", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
     dependencies: { transcribeAudioFile: forbidden, summarizeTranscript: forbidden, identifySpeakersFromFrames: forbidden, identifySpeakersFromContext: forbidden, extractSpeakerFrames: forbidden, detectMeetingBoundaries: forbidden },
     localEngine: {
       splitAudio: async () => ["local.wav"],
       transcribeAudioFile: async (options) => { assert.equal(options.apiKey, undefined); assert.equal(options.fetchImpl, undefined); return { text: "Решили запустить проект.", segments: [{ start: 0, end: 3, text: "Решили запустить проект." }] }; },
-      summarizeTranscript: async () => "ПРИНЯТЫЕ РЕШЕНИЯ\nЗапустить проект.",
+      summarizeTranscript: async ({ summaryDetail }) => { assert.equal(summaryDetail, "brief"); return "ПРИНЯТЫЕ РЕШЕНИЯ\nЗапустить проект."; },
       detectMeetingBoundaries: async () => [{ start_segment_id: 1, end_segment_id: 1, title: "Созвон" }]
     }
   });
@@ -106,7 +106,9 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
     }
     promptFile = args[args.indexOf("-f") + 1];
     assert.match(await fs.readFile(promptFile, "utf8"), /Ship Monday/);
-    return "EXECUTIVE SUMMARY\nShip Monday.";
+    const schemaFile = args[args.indexOf("--json-schema-file") + 1];
+    assert.equal(JSON.parse(await fs.readFile(schemaFile, "utf8")).type, "object");
+    return JSON.stringify({ items: [{ kind: "decision", topic: "Shipping", text: "Ship Monday.", source_ids: [1], owner: null }] });
   } });
   const transcription = await engine.transcribeAudioFile({ filePath: path.join(directory, "test.wav") });
   assert.equal(transcription.text, "Ship Monday");
