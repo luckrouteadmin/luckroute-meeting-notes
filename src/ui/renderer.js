@@ -11,7 +11,7 @@ const COPY = Object.freeze({
     settingsAria: "Открыть настройки",
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Сводка созвона",
-    subtitle: "Из видео и аудио — в полную расшифровку и содержательную деловую сводку",
+    subtitle: "Из видео и аудио — в полную расшифровку и сводку",
     keyNoticeTitle: "OpenAI заблокирован без ключа",
     keyNoticeText: "Локальный режим доступен без ключа. Добавьте свой API-ключ, если хотите включить облачную обработку.",
     modeMeta: "ЛОКАЛЬНО / OPENAI",
@@ -27,7 +27,7 @@ const COPY = Object.freeze({
     localDescription: "Расшифровка и сводка создаются на вашем компьютере. После установки моделей интернет не нужен; записи, текст и кадры никуда не отправляются.",
     cloudDescription: "Аудио и текст отправляются в OpenAI. Для видеозаписей программа автоматически анализирует также отдельные кадры с подписями. Нужен интернет; использование оплачивается по вашему API-ключу.",
     localNames: "Имена и роли учитываются в сводке по явно сказанному. Локальный режим пока не разделяет голоса и не подписывает отдельные реплики именами.",
-    modelRequirements: "Whisper + Qwen3 · загрузка около 3 ГБ с Hugging Face · рекомендуется 8 ГБ ОЗУ, лучше 16 ГБ. Скорость и качество зависят от компьютера; сводка может уступать OpenAI.",
+    modelRequirements: "Whisper + Qwen3.5 9B · около 6,2 ГБ с Hugging Face · рекомендуется 16 ГБ ОЗУ. После обновления потребуется скачать новую модель сводки; на CPU обработка может быть долгой.",
     downloadModels: "Скачать модели",
     pauseDownload: "Приостановить",
     modelsNeeded: "Один раз установите локальные модели",
@@ -63,7 +63,7 @@ const COPY = Object.freeze({
     start: "Создать расшифровку и сводку",
     stop: "Остановить",
     stopping: "Останавливаю обработку…",
-    outputHint: "На выходе: полная расшифровка и подробная сводка в TXT",
+    outputHint: "На выходе: полная расшифровка и сводка в TXT",
     developedBy: "Разработчик",
     version: "Версия {version}",
     settingsEyebrow: "НАСТРОЙКИ",
@@ -87,7 +87,7 @@ const COPY = Object.freeze({
     meetingsDoneTitle: "Готово — найдено созвонов: {count}",
     filesDoneMessage: "Сохранено TXT-файлов: {count}",
     oneDoneTitle: "Готово — сохранены два TXT-файла",
-    oneDoneMessage: "Расшифровка и подробная сводка готовы",
+    oneDoneMessage: "Расшифровка и сводка готовы",
     namesCount: "имён: {count}",
     rolesCount: "ролей: {count}"
   }),
@@ -99,7 +99,7 @@ const COPY = Object.freeze({
     settingsAria: "Open settings",
     eyebrow: "MEETING INTELLIGENCE",
     appTitle: "Meeting Notes",
-    subtitle: "Turn video and audio recordings into a full transcript and a substantive business summary",
+    subtitle: "Turn video and audio into a full transcript and meeting summary",
     keyNoticeTitle: "OpenAI is locked without a key",
     keyNoticeText: "Local mode works without a key. Add your API key if you want to enable cloud processing.",
     modeMeta: "LOCAL / OPENAI",
@@ -115,7 +115,7 @@ const COPY = Object.freeze({
     localDescription: "Transcripts and summaries are created on your computer. Once models are installed, no internet is needed. Recordings, text and frames never leave this device.",
     cloudDescription: "Audio and text are sent to OpenAI. For video recordings, selected frames are also analyzed automatically to identify speakers. Requires internet; charges apply to your API key.",
     localNames: "Explicitly mentioned names and roles are used in the summary. Local mode does not yet distinguish voices or assign names to individual utterances.",
-    modelRequirements: "Whisper + Qwen3 · about 3 GB downloaded from Hugging Face · 8 GB RAM recommended, preferably 16 GB. Speed depends on your computer; summaries may be less capable than OpenAI.",
+    modelRequirements: "Whisper + Qwen3.5 9B · about 6.2 GB from Hugging Face · 16 GB RAM recommended. Download the new summary model after upgrading; CPU processing may take a long time.",
     downloadModels: "Download models",
     pauseDownload: "Pause download",
     modelsNeeded: "Install local models once",
@@ -151,7 +151,7 @@ const COPY = Object.freeze({
     start: "Create transcript and summary",
     stop: "Stop",
     stopping: "Stopping processing…",
-    outputHint: "Output: a full transcript and detailed summary in TXT",
+    outputHint: "Output: a full transcript and summary in TXT",
     developedBy: "Developer",
     version: "Version {version}",
     settingsEyebrow: "SETTINGS",
@@ -175,7 +175,7 @@ const COPY = Object.freeze({
     meetingsDoneTitle: "Done — meetings found: {count}",
     filesDoneMessage: "TXT files saved: {count}",
     oneDoneTitle: "Done — two TXT files saved",
-    oneDoneMessage: "The transcript and detailed summary are ready",
+    oneDoneMessage: "The transcript and summary are ready",
     namesCount: "names: {count}",
     rolesCount: "roles: {count}"
   })
@@ -192,10 +192,8 @@ const elements = {
   cancelDownloadButton: document.querySelector("#cancelDownloadButton"),
   modelDownloadProgress: document.querySelector("#modelDownloadProgress"),
   identifyNamesDescription: document.querySelector("#identifyNamesDescription"),
-  keyNotice: document.querySelector("#keyNotice"),
   languageButtons: [...document.querySelectorAll("#languageSwitch [data-locale]")],
   settingsButton: document.querySelector("#settingsButton"),
-  noticeSettingsButton: document.querySelector("#noticeSettingsButton"),
   chooseVideoButton: document.querySelector("#chooseVideoButton"),
   chooseOutputButton: document.querySelector("#chooseOutputButton"),
   identityNotice: document.querySelector("#identityNotice"),
@@ -336,7 +334,6 @@ function updateControls() {
   elements.splitMeetingsCheckbox.disabled = busy;
   elements.summaryDetail.disabled = busy;
   elements.settingsButton.disabled = busy;
-  elements.noticeSettingsButton.disabled = busy;
   for (const button of elements.languageButtons) button.disabled = busy;
   elements.localModeButton.disabled = busy;
   elements.openaiModeButton.disabled = busy || !state.hasApiKey;
@@ -348,13 +345,13 @@ function updateControls() {
   elements.openaiModeButton.setAttribute("aria-pressed", String(!local));
   elements.modeDescription.textContent = t(local ? "localDescription" : "cloudDescription");
   elements.modelSetup.hidden = !local;
+  elements.modelSetup.classList.toggle("ready", state.modelsReady);
   elements.downloadModelsButton.hidden = state.downloading || state.modelsReady;
   elements.downloadModelsButton.disabled = busy;
   elements.cancelDownloadButton.hidden = !state.downloading;
   elements.modelDownloadProgress.hidden = !state.downloading;
   if (!state.downloading) elements.modelStatus.textContent = t(state.modelsReady ? "modelsReady" : "modelsNeeded");
   elements.cancelButton.hidden = !state.running;
-  elements.keyNotice.hidden = state.hasApiKey;
   elements.deleteKeyButton.hidden = !state.hasApiKey;
 }
 
@@ -520,7 +517,6 @@ for (const button of elements.languageButtons) {
 }
 
 elements.settingsButton.addEventListener("click", openSettings);
-elements.noticeSettingsButton.addEventListener("click", openSettings);
 elements.closeSettingsButton.addEventListener("click", closeSettings);
 elements.cancelSettingsButton.addEventListener("click", closeSettings);
 

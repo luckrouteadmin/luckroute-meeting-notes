@@ -9,12 +9,12 @@ test("local analysis preserves complete input and bounds long utterances in UTF-
   const rows = transcriptRows(`Private filename\n[00:00:00–00:20:00] Спикер: ${text}`);
   assert.equal(rows.map(row => row.text).join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
   assert.ok(rows.every(row => Buffer.byteLength(row.text) <= 1400));
-  assert.ok(splitRows(rows).every(block => Buffer.byteLength(JSON.stringify(block)) < 5000));
+  assert.ok(splitRows(rows, 4800).every(block => Buffer.byteLength(JSON.stringify(block)) < 5000));
   assert.ok(rows.every(row => !row.text.includes("Private filename")));
 });
 
 test("multi-part facts reach the final summary without an LLM compression stage", async () => {
-  const transcript = Array.from({ length: 24 }, (_, i) => `[00:${String(i).padStart(2, "0")}:00–00:${String(i).padStart(2, "0")}:59] Спикер: Topic ${i + 1}: ${"A source fact. ".repeat(25)}`).join("\n");
+  const transcript = Array.from({ length: 72 }, (_, i) => `[00:${String(i).padStart(2, "0")}:00–00:${String(i).padStart(2, "0")}:59] Спикер: Topic ${i + 1}: ${"A source fact. ".repeat(25)}`).join("\n");
   let calls = 0;
   const summary = await summarizeLocalNotes({ transcript, summaryDetail: "detailed", locale: "en", generate: async (_instructions, input, options) => {
     calls++;
@@ -23,7 +23,8 @@ test("multi-part facts reach the final summary without an LLM compression stage"
     return JSON.stringify({ items: rows.map(row => item(row.id, `Decision ${row.id}: deliver if approved.`, "decision", `Topic ${row.id}`)) });
   } });
   assert.equal(calls, splitRows(transcriptRows(transcript)).length);
-  for (let i = 1; i <= 24; i++) assert.match(summary, new RegExp(`Decision ${i}: deliver if approved\\.`));
+  assert.ok(calls > 1);
+  for (let i = 1; i <= 72; i++) assert.match(summary, new RegExp(`Decision ${i}: deliver if approved\\.`));
 });
 
 test("invalid or empty fragment output is retried on smaller inputs, never silently skipped", async () => {

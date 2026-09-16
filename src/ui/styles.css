@@ -57,6 +57,8 @@ h1 { margin: 0 0 4px; font-size: 25px; line-height: 1.12; letter-spacing: -.035e
 .model-setup strong { font-size: 12px; }
 .model-setup p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .model-setup progress { flex-basis: 100%; }
+.model-setup.ready { margin-top: 7px; padding: 7px 10px; }
+.model-setup.ready p { display: none; }
 .panel-heading { justify-content: space-between; gap: 18px; margin-bottom: 13px; }
 .panel-heading h2 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
 .panel-eyebrow { color: var(--muted); margin-bottom: 4px; }

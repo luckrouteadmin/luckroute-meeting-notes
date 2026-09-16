@@ -106,12 +106,14 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
     }
     promptFile = args[args.indexOf("-f") + 1];
     assert.match(await fs.readFile(promptFile, "utf8"), /Ship Monday/);
-    const schemaFile = args[args.indexOf("--json-schema-file") + 1];
-    assert.equal(JSON.parse(await fs.readFile(schemaFile, "utf8")).type, "object");
-    return JSON.stringify({ items: [{ kind: "decision", topic: "Shipping", text: "Ship Monday.", source_ids: [1], owner: null }] });
+    assert.equal(args.includes("--json-schema-file"), false);
+    assert.ok((await fs.readFile(promptFile, "utf8")).endsWith("<think>\n"));
+    return "Private model analysis</think>\n" + JSON.stringify({ items: [{ kind: "decision", topic: "Shipping", text: "Ship Monday.", source_ids: [1], owner: null }] });
   } });
   const transcription = await engine.transcribeAudioFile({ filePath: path.join(directory, "test.wav") });
   assert.equal(transcription.text, "Ship Monday");
-  assert.match(await engine.summarizeTranscript({ transcript: "Ship Monday" }), /Ship Monday/);
+  const summary = await engine.summarizeTranscript({ transcript: "Ship Monday" });
+  assert.match(summary, /Ship Monday/);
+  assert.ok(!summary.includes("Private model analysis"));
   await assert.rejects(fs.stat(promptFile), { code: "ENOENT" });
 });

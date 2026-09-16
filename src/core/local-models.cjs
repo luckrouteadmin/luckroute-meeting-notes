@@ -14,11 +14,14 @@ const MODELS = Object.freeze([
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin"
   }),
   Object.freeze({
-    id: "qwen3-4b", file: "Qwen3-4B-Q4_K_M.gguf", size: 2497280256,
-    sha256: "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
-    url: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf"
+    id: "qwen35-9b", file: "Qwen3.5-9B-Q4_K_M.gguf", size: 5680522464,
+    sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+    url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf"
   })
 ]);
+
+const RETIRED_SUMMARY_MODEL = Object.freeze({ file: "Qwen3-4B-Q4_K_M.gguf", size: 2497280256,
+  sha256: "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5" });
 
 function localError(code, ru, en, locale = "ru") {
   return Object.assign(new Error(locale === "en" ? en : ru), { code });
@@ -135,6 +138,14 @@ async function downloadModels({ directory, signal, fetchImpl = fetch, onProgress
     await fs.rename(partial, destination);
     completed += model.size;
     onProgress({ downloaded: completed, total });
+  }
+  if (models === MODELS) {
+    const retired = path.join(directory, RETIRED_SUMMARY_MODEL.file);
+    // Remove only the exact old weights, after replacement files passed verification.
+    // A user-replaced or renamed model is never treated as our disposable cache.
+    try {
+      if (await verifyModel(retired, RETIRED_SUMMARY_MODEL, signal)) await fs.rm(retired);
+    } catch { /* Cleanup must not invalidate successfully installed new models. */ }
   }
   return getModelStatus(directory, models);
 }

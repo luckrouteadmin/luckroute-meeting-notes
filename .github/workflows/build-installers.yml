@@ -89,6 +89,8 @@ jobs:
         run: npm run check && npm test
       - name: Build bundled offline engines
         run: npm run build:local
+      - name: Verify real local summary model
+        run: node scripts/smoke-local-summary.cjs
       - name: Build EXE installer with retry
         shell: pwsh
         run: |
@@ -139,6 +141,8 @@ jobs:
         run: npm run check && npm test
       - name: Build bundled offline engines
         run: npm run build:local
+      - name: Verify real local summary model
+        run: node scripts/smoke-local-summary.cjs
       - name: Build DMG installer with retry
         shell: bash
         run: |

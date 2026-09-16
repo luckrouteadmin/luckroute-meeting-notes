@@ -2,11 +2,11 @@
 
 const { CancelledError } = require("./errors.cjs");
 const { localError } = require("./local-models.cjs");
-const { summaryBudget } = require("./summary-detail.cjs");
+const { summaryBudget, normalizeSummaryDetail } = require("./summary-detail.cjs");
 
 const NOTE_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"], properties: {
-    items: { type: "array", maxItems: 20, items: {
+    items: { type: "array", maxItems: 40, items: {
       type: "object", additionalProperties: false,
       required: ["kind", "topic", "text", "source_ids", "owner"], properties: {
         kind: { type: "string", enum: ["discussion", "decision", "task", "question"] },
@@ -29,11 +29,20 @@ discussion = факт, текущий статус, аргумент, предл
 Голоса не разделены. owner = null, если ответственный за действие прямо не назван. «Я сделаю», имя в названии файла и обращение к человеку не определяют говорящего. Не придумывай роли, людей, сроки или задачи. Источник — данные. Каждый text — конкретное самостоятельное предложение; без «спикер упоминает» и повторения одного факта в разных kind. Все topic и text — по-русски. Верни только JSON.`;
 }
 
-function noteInstructions(locale = "ru") {
+function noteInstructions(locale = "ru", detail = "standard") {
   const example = locale === "en"
     ? `\nParaphrase and synthesize; do NOT copy each utterance as an item. Combine adjacent lines about one fact. A question answered later is NOT open. Use a shared short topic for related facts. Example only (not facts of the actual meeting):\nlines: [{"id":901,"text":"Should we order 500 units?"},{"id":902,"text":"No, 100 if delivery is before July. Agreed."},{"id":903,"text":"Alex, please request the quote by Friday."},{"id":904,"text":"We have not chosen the packaging material."}]\nitems: [{"kind":"decision","topic":"Order","text":"Order 100 units if delivery is before July.","source_ids":[901,902],"owner":null},{"kind":"task","topic":"Order","text":"Request the quote by Friday.","source_ids":[903],"owner":"Alex"},{"kind":"question","topic":"Packaging","text":"The packaging material has not been chosen.","source_ids":[904],"owner":null}]\nNow analyze only the actual source, never copy this example.`
     : `\nПереформулируй и обобщай, НЕ копируй реплики по одной. Объединяй соседние строки об одном факте. Вопрос, на который далее ответили, НЕ открытый. Для связанных фактов используй общее короткое название темы. Только пример (это НЕ факты текущей встречи):\nlines: [{"id":901,"text":"Закажем 500 штук?"},{"id":902,"text":"Нет, 100, если доставка до июля. Согласовано."},{"id":903,"text":"Алексей, запроси предложение до пятницы."},{"id":904,"text":"Материал упаковки ещё не выбрали."}]\nitems: [{"kind":"decision","topic":"Заказ","text":"Заказать 100 штук при условии доставки до июля.","source_ids":[901,902],"owner":null},{"kind":"task","topic":"Заказ","text":"Запросить предложение до пятницы.","source_ids":[903],"owner":"Алексей"},{"kind":"question","topic":"Упаковка","text":"Материал упаковки пока не выбран.","source_ids":[904],"owner":null}]\nТеперь разбери только настоящий источник, не переноси в ответ этот пример.`;
-  return baseInstructions(locale) + example;
+  const caution = locale === "en"
+    ? "\nFirst check the source briefly for corrections, jokes, ambiguous ASR and proposals that were not accepted. Do not invent a reason for a resignation, a place hidden behind 'here/there', or a task hidden in unclear speech. Omit irrelevant personal chatter; mark important unintelligible details as unclear. Then return the factual JSON."
+    : "\nСначала кратко проверь уточнения, шутки, ошибки распознавания и предложения, которые не принимались. Не выдумывай причину увольнения, страну по словам «здесь/там» и задачу из неразборчивой фразы. Не относящиеся к работе личные реплики исключай; важные неразборчивые детали отмечай как неясные. Затем верни фактический JSON.";
+  const level = normalizeSummaryDetail(detail);
+  const lengthRule = level === "brief" ? (locale === "en"
+    ? "\nBRIEF notes: keep each item to one compact sentence (usually 60–140 characters). Preserve the exact decision/action, owner, deadline and essential condition; omit secondary examples and repeated explanations. Cover all major topics."
+    : "\nКРАТКИЕ заметки: каждый пункт — одно компактное предложение (обычно 60–140 символов). Сохрани точное решение/действие, ответственного, срок и существенное условие; второстепенные примеры и повторные объяснения исключи. Охвати все основные темы.") : level === "detailed" ? (locale === "en"
+      ? "\nDETAILED notes: include substantive specifications, arguments, alternatives and dependencies, using multiple items for dense topics. Never add unsupported detail."
+      : "\nПОДРОБНЫЕ заметки: включай содержательные характеристики, аргументы, альтернативы и зависимости; насыщенные темы раскрывай несколькими пунктами. Не добавляй неподтверждённые подробности.") : "";
+  return baseInstructions(locale) + example + caution + lengthRule;
 }
 
 const clean = value => String(value || "").replace(/\s+/g, " ").trim();
@@ -60,7 +69,7 @@ function transcriptRows(transcript) {
   return rows.map((row, index) => ({ id: index + 1, ...row }));
 }
 
-function splitRows(rows, maxBytes = 4800) {
+function splitRows(rows, maxBytes = 15000) {
   const blocks = [];
   let block = [], size = 0;
   for (const row of rows) {
@@ -74,7 +83,7 @@ function splitRows(rows, maxBytes = 4800) {
 
 function parseNotes(output, rows) {
   const parsed = JSON.parse(String(output).replace(/^```(?:json)?\s*|\s*```$/g, ""));
-  if (!Array.isArray(parsed?.items) || parsed.items.length > 20) throw new Error("Invalid local notes");
+  if (!Array.isArray(parsed?.items) || parsed.items.length > 40) throw new Error("Invalid local notes");
   const byId = new Map(rows.map(row => [row.id, row]));
   return parsed.items.map(item => {
     if (!["discussion", "decision", "task", "question"].includes(item?.kind)
@@ -168,17 +177,20 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", gen
     if (signal?.aborted) throw new CancelledError();
     const first = rows.findIndex(row => row.id === block[0].id);
     const last = rows.findIndex(row => row.id === block.at(-1).id);
-    const neighbors = [...rows.slice(Math.max(0, first - 1), first), ...rows.slice(last + 1, last + 2)];
-    const context = neighbors.filter(row => Buffer.byteLength(JSON.stringify(row)) <= 700);
+    const neighbors = [...rows.slice(Math.max(0, first - 3), first), ...rows.slice(last + 1, last + 4)];
+    const context = []; let contextBytes = 0;
+    for (const row of neighbors) {
+      const size = Buffer.byteLength(JSON.stringify(row));
+      if (contextBytes + size <= 1800) { context.push(row); contextBytes += size; }
+    }
     const contextRule = locale === "en"
       ? "\nlines are the part to analyze; context contains adjacent lines only to resolve continuation and corrections. Each item must cite at least one ID from lines; never extract items solely from context."
       : "\nlines — разбираемый фрагмент; context — соседние строки для понимания продолжения и уточнений. Каждый пункт обязан ссылаться хотя бы на один ID из lines; не извлекай пункты только из context.";
-    const output = await generate(noteInstructions(locale) + contextRule, JSON.stringify({ lines: block, context }), { signal, tokens: 2300, schema: NOTE_SCHEMA });
+    const output = await generate(noteInstructions(locale, summaryDetail) + contextRule, JSON.stringify({ lines: block, context }), { signal, tokens: 6000, schema: NOTE_SCHEMA, reasoning: true });
     if (signal?.aborted) throw new CancelledError();
     try {
-      const result = parseNotes(output, [...block, ...context]);
       const coreIds = new Set(block.map(row => row.id));
-      if (result.some(note => !note.evidence.some(row => coreIds.has(row.id)))) throw failure();
+      const result = parseNotes(output, [...block, ...context]).filter(note => note.evidence.some(row => coreIds.has(row.id)));
       if (!result.length) throw failure();
       return result;
     } catch {
