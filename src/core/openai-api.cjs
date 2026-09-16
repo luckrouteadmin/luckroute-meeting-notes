@@ -10,6 +10,7 @@ const {
 } = require("./prompt.cjs");
 const { buildBoundaryInput } = require("./meeting-boundaries.cjs");
 const { normalizeLocale, translate } = require("./locale.cjs");
+const { detailInstructions, summaryBudget } = require("./summary-detail.cjs");
 const { CONTEXT_SCHEMA, contextInstructions, contextRows, buildContextWindows } = require("./context-identity.cjs");
 
 const API_BASE_URL = "https://api.openai.com/v1";
@@ -587,6 +588,7 @@ function splitLongText(text, maximumCharacters = NOTES_CHUNK_CHARACTERS) {
 
 async function summarizeTranscript({
   transcript,
+  summaryDetail = "standard",
   apiKey,
   signal,
   fetchImpl = fetch,
@@ -597,6 +599,8 @@ async function summarizeTranscript({
   locale = "ru"
 }) {
   const normalizedLocale = normalizeLocale(locale);
+  const instructions = `${getSummaryInstructions(normalizedLocale)}\n\n${detailInstructions(transcript, summaryDetail, normalizedLocale)}`;
+  const maxOutputTokens = Math.min(24000, Math.max(2000, Math.ceil(summaryBudget(transcript, summaryDetail).max * 0.8) + 1000));
   const summaryLabel = label || translate(normalizedLocale, "summaryLabelOne");
   let currentPercent = progressStart;
   const emit = (fraction, message) => {
@@ -620,9 +624,9 @@ async function summarizeTranscript({
     emit(0.12, translate(normalizedLocale, "summaryDetailed", { label: summaryLabel }));
     return createTextResponse({
       apiKey,
-      instructions: getSummaryInstructions(normalizedLocale),
+      instructions,
       input: wrapTranscript(transcript, normalizedLocale),
-      maxOutputTokens: 24_000,
+      maxOutputTokens,
       signal,
       fetchImpl,
       onRetry,
@@ -655,11 +659,11 @@ async function summarizeTranscript({
   emit(0.9, translate(normalizedLocale, "summaryFinal", { label: summaryLabel }));
   return createTextResponse({
     apiKey,
-    instructions: getSummaryInstructions(normalizedLocale),
+    instructions,
     input: `${translate(normalizedLocale, "longNotesIntro")}\n\n${notes.map((note, index) => (
       `${translate(normalizedLocale, "longNotesPart", { number: index + 1 })}\n${note}`
     )).join("\n\n")}`,
-    maxOutputTokens: 24_000,
+    maxOutputTokens,
     signal,
     fetchImpl,
     onRetry,

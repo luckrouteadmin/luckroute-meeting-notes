@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("meetingNotes", {
   chooseOutputDirectory: () => ipcRenderer.invoke("dialog:choose-output"),
   setLocale: (locale) => ipcRenderer.invoke("settings:set-locale", locale),
   setMode: (mode) => ipcRenderer.invoke("settings:set-mode", mode),
+  setSummaryDetail: (value) => ipcRenderer.invoke("settings:set-summary-detail", value),
   downloadModels: () => ipcRenderer.invoke("local:download-models"),
   cancelDownload: () => ipcRenderer.invoke("local:cancel-download"),
   onDownloadProgress: (callback) => {

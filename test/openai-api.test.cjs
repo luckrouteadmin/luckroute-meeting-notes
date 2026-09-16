@@ -15,9 +15,25 @@ const {
   REQUEST_ATTEMPTS,
   requestWithRetry,
   splitLongText,
+  summarizeTranscript,
   transcribeAudioFile
 } = require("../src/core/openai-api.cjs");
 const { ApiError, toUserError } = require("../src/core/errors.cjs");
+
+test("summary detail reaches OpenAI in both direct and long-transcript paths", async () => {
+  for (const [summaryDetail, transcript, finalWord] of [["brief", "[00:00:00–00:50:00] Speaker: " + "Fact. ".repeat(6000), "Brief:"], ["detailed", "Fact. ".repeat(120000), "Detailed:"]]) {
+    const requests = [];
+    await summarizeTranscript({ transcript, summaryDetail, locale: "en", apiKey: "test-only", fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body); requests.push(body);
+      assert.equal(body.store, false);
+      return new Response(JSON.stringify({ output_text: "Source-grounded notes." }), { status: 200 });
+    } });
+    assert.ok(requests.at(-1).instructions.includes(finalWord));
+    assert.match(requests.at(-1).instructions, /never pad/);
+    if (summaryDetail === "brief") assert.ok(requests[0].max_output_tokens < 24000);
+    else assert.ok(requests.length > 1);
+  }
+});
 
 test("контекст отправляет только текст без хранения и отклоняет цитаты вне окна", async () => {
   const valid = { speaker_key: "0:A", name: "Мария", role: null, role_category: "unknown", confidence: "high", basis: "self_introduction", evidence: [{ segment_id: "p0-s0", quote: "Меня зовут Мария." }] };
