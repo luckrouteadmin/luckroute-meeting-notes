@@ -213,10 +213,10 @@ jobs:
             '' \
             'Поддерживаемые видеоформаты: MP4, MOV, M4V, MKV, AVI и WebM.' \
             'Supported video formats: MP4, MOV, M4V, MKV, AVI, and WebM.' \
-            'Режимы: на компьютере или OpenAI. Без ключа OpenAI заблокирован. Локальные модели (около 6,2 ГБ) скачиваются кнопкой в программе один раз; затем интернет не нужен.' \
-            'Modes: on-device or OpenAI. OpenAI requires a key. Download local models once (about 6.2 GB) using the in-app button, then work offline.' \
-            'Локально: рекомендуется 16 ГБ ОЗУ; Windows/Intel требуют AVX. Голоса и имена по видео пока доступны только в OpenAI.' \
-            'Local mode: 16 GB RAM recommended; Windows/Intel require AVX. Voice separation and video speaker names are OpenAI-only.' \
+            'Режимы: на компьютере или OpenAI. Без ключа OpenAI заблокирован. Локальные модели (около 3 ГБ) скачиваются кнопкой в программе один раз; затем интернет не нужен.' \
+            'Modes: on-device or OpenAI. OpenAI requires a key. Download local models once (about 3 GB) using the in-app button, then work offline.' \
+            'Локально: рекомендуется 8 ГБ ОЗУ или больше; Windows/Intel требуют AVX. Голоса и имена по видео пока доступны только в OpenAI.' \
+            'Local mode: 8 GB RAM or more recommended; Windows/Intel require AVX. Voice separation and video speaker names are OpenAI-only.' \
             'Видео и аудио можно смешивать: MP4, MOV, M4V, MKV, AVI, WebM; MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WMA, AIFF/AIF, AMR.' \
             'Имена и роли анализируются автоматически. OpenAI сопоставляет кадры и диалог; предполагаемые роли отмечаются отдельно. Подписи и сводки требуют проверки.' \
             'Audio and video can be mixed. Names and roles are analyzed automatically; inferred roles are marked. Local mode does not assign identities to individual utterances.' \
@@ -273,7 +273,7 @@ jobs:
             --target "$GITHUB_SHA" \
             --draft \
             --title "Luckroute Meeting Notes $TAG" \
-            --notes 'Версия 1.3.2: переработана локальная сводка — короткие фрагменты с контекстом, сборка по разделам без повторного сжатия всей встречи, повторный разбор некорректных ответов. Новая модель Qwen3.5 9B: после обновления нажмите «Скачать модели» (около 5,7 ГБ новой загрузки; всего около 6,2 ГБ). Рекомендуется 16 ГБ ОЗУ; на CPU обработка может быть долгой. Сводки требуют проверки, особенно цифры, условия и ответственные. Сохранены компактный интерфейс, ползунок подробности, RU/EN, локальный режим и OpenAI, видео и аудио, несколько файлов. Разработчик: Luckroute IT department. Установщики Windows x64, macOS Apple Silicon и Intel; SHA-256 и GitHub artifact attestations прилагаются.'
+            --notes 'Версия 1.3.2: обработка локальной сводки по коротким фрагментам, отметки времени для проверки, защита от пропуска пустых ответов и диагностика встроенных движков. Модели прежние; повторная загрузка не требуется. Сохранены компактный интерфейс, ползунок подробности, RU/EN, локальный режим и OpenAI, видео и аудио, несколько файлов. Разработчик: Luckroute IT department. Установщики Windows x64, macOS Apple Silicon и Intel; SHA-256 и GitHub artifact attestations прилагаются.'
 
           expected_count="$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')"
           actual_count="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"

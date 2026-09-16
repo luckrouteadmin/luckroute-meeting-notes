@@ -29,11 +29,13 @@ async function main() {
     "[00:00:00–00:00:30] Speaker: Cedar project: we agreed to ship the pilot on Monday. Maya will test the sample on Friday.",
     "[00:00:30–00:01:00] Speaker: For Cedar, order 600 units if the sample passes; otherwise order 300 units. Keep both conditions in the plan.",
     "[00:01:00–00:01:30] Speaker: Willow project: the warehouse quote is still missing. Omar will request the quote tomorrow.",
-    "[00:01:30–00:02:00] Speaker: We have not approved Willow's budget. Wait for the quote before deciding."
+    "[00:01:30–00:02:00] Speaker: We have not approved Willow's budget. Wait for the quote before deciding.",
+    "[00:02:00–00:02:20] Speaker: Did a rival already buy this design? Let me check the message.",
+    "[00:02:20–00:02:40] Speaker: Correction: the rival only plans to order the product. No acquisition occurred, and no order is confirmed."
   ].join("\n");
   console.log("Starting native inference.");
   const summary = await engine.summarizeTranscript({ transcript, summaryDetail: "detailed", onProgress: event => console.log(event.message) });
-  for (const expected of [/Cedar/i, /Willow/i, /600/, /300/, /DECISIONS/, /ACTION ITEMS BY OWNER/]) assert.match(summary, expected);
+  for (const expected of [/Cedar/i, /Willow/i, /600/, /300/, /plan(?:s|ned|ning)?\b/i, /DECISIONS/, /ACTION ITEMS BY OWNER/]) assert.match(summary, expected);
   // This is generated only from the synthetic fixture above, never user data.
   console.log(summary);
   console.log(`Native summary verification passed (${summary.length} characters).`);
