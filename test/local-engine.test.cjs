@@ -72,12 +72,12 @@ test("local workflow never invokes cloud transcription, summary, boundaries, or 
   await fs.writeFile(video, "fixture");
   const forbidden = () => assert.fail("A cloud capability was called in local mode");
   const result = await runMeetingWorkflow({ videoPaths: [video], outputDirectory: directory,
-    mode: "local", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
+    mode: "local", summaryDetail: "brief", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
     dependencies: { transcribeAudioFile: forbidden, summarizeTranscript: forbidden, identifySpeakersFromFrames: forbidden, identifySpeakersFromContext: forbidden, extractSpeakerFrames: forbidden, detectMeetingBoundaries: forbidden },
     localEngine: {
       splitAudio: async () => ["local.wav"],
       transcribeAudioFile: async (options) => { assert.equal(options.apiKey, undefined); assert.equal(options.fetchImpl, undefined); return { text: "Решили запустить проект.", segments: [{ start: 0, end: 3, text: "Решили запустить проект." }] }; },
-      summarizeTranscript: async () => "ПРИНЯТЫЕ РЕШЕНИЯ\nЗапустить проект.",
+      summarizeTranscript: async ({ summaryDetail }) => { assert.equal(summaryDetail, "brief"); return "ПРИНЯТЫЕ РЕШЕНИЯ\nЗапустить проект."; },
       detectMeetingBoundaries: async () => [{ start_segment_id: 1, end_segment_id: 1, title: "Созвон" }]
     }
   });
@@ -98,6 +98,7 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
   await fs.writeFile(path.join(directory, "whisper-cli" + suffix), "fixture");
   await fs.writeFile(path.join(directory, "llama-completion" + suffix), "fixture");
   let promptFile;
+  const summaryRequests = [];
   const engine = await createLocalEngine({ modelDirectory: directory, binaryDirectory: directory, locale: "en", verify: async () => {}, runProcess: async (binary, args) => {
     if (binary.includes("whisper-cli")) {
       assert.equal(args[args.indexOf("-l") + 1], "auto");
@@ -105,11 +106,17 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
       return "";
     }
     promptFile = args[args.indexOf("-f") + 1];
-    assert.match(await fs.readFile(promptFile, "utf8"), /Ship Monday/);
+    const prompt = await fs.readFile(promptFile, "utf8");
+    assert.match(prompt, /Ship Monday/);
+    summaryRequests.push({ prompt, tokens: Number(args[args.indexOf("-n") + 1]) });
     return "EXECUTIVE SUMMARY\nShip Monday.";
   } });
   const transcription = await engine.transcribeAudioFile({ filePath: path.join(directory, "test.wav") });
   assert.equal(transcription.text, "Ship Monday");
-  assert.match(await engine.summarizeTranscript({ transcript: "Ship Monday" }), /Ship Monday/);
+  assert.match(await engine.summarizeTranscript({ transcript: "Ship Monday", summaryDetail: "brief" }), /Ship Monday/);
+  assert.match(summaryRequests.at(-1).prompt, /Selected detail level — Brief:/);
+  assert.ok(summaryRequests.at(-1).tokens >= 1400);
+  await engine.summarizeTranscript({ transcript: "Ship Monday", summaryDetail: "detailed" });
+  assert.match(summaryRequests.at(-1).prompt, /Selected detail level — Detailed:/);
   await assert.rejects(fs.stat(promptFile), { code: "ENOENT" });
 });

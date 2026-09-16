@@ -15,8 +15,8 @@
           <div class="brand-lockup">
             <img class="brand-mark" src="luckroute.svg" alt="Luckroute">
             <div>
-              <p class="brand-name">Luckroute IT department</p>
-              <p class="brand-unit" data-i18n="brandUnit">AI WORKSPACE</p>
+              <h1 data-i18n="appTitle">Сводка созвона</h1>
+              <p class="brand-unit">LUCKROUTE</p>
             </div>
           </div>
 
@@ -35,25 +35,10 @@
         </div>
 
         <div class="hero-copy">
-          <p class="eyebrow" data-i18n="eyebrow">MEETING INTELLIGENCE</p>
-          <h1 data-i18n="appTitle">Сводка созвона</h1>
           <p class="subtitle" data-i18n="subtitle">Из видеозаписей — в полную расшифровку и содержательную деловую сводку</p>
         </div>
 
-        <div class="hero-meta" aria-hidden="true">
-          <span>MP4 · MOV · MP3 · WAV · M4A · FLAC</span>
-          <span class="meta-dot"></span>
-          <span data-i18n="modeMeta">ЛОКАЛЬНО / OPENAI</span>
-        </div>
       </header>
-
-      <section id="keyNotice" class="notice" hidden>
-        <div>
-          <strong data-i18n="keyNoticeTitle">Нужна однократная настройка</strong>
-          <span data-i18n="keyNoticeText">Сохраните API-ключ OpenAI — после этого останутся выбор файлов и один запуск.</span>
-        </div>
-        <button id="noticeSettingsButton" class="text-button" type="button" data-i18n="configure">Настроить</button>
-      </section>
 
       <section class="workspace-panel">
         <section class="mode-panel" aria-labelledby="modeHeading">
@@ -71,13 +56,6 @@
             <progress id="modelDownloadProgress" max="100" value="0" hidden></progress>
           </div>
         </section>
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow panel-eyebrow" data-i18n="workspaceEyebrow">НОВАЯ ОБРАБОТКА</p>
-            <h2 data-i18n="workspaceTitle">Подготовьте материалы</h2>
-          </div>
-          <span class="one-click-label" data-i18n="oneClick">ОДИН ЗАПУСК</span>
-        </div>
 
         <section class="selection-card" aria-labelledby="sourceHeading">
           <div class="step-number">01</div>
@@ -97,6 +75,13 @@
             <p id="outputPath" class="path-value empty" data-i18n="noFolder">Папка не выбрана</p>
           </div>
           <button id="chooseOutputButton" class="secondary-button" type="button" data-i18n="chooseFolder">Выбрать папку</button>
+        </section>
+
+        <section class="detail-panel" aria-labelledby="detailHeading">
+          <div class="detail-heading"><label id="detailHeading" for="summaryDetail" data-i18n="detailHeading">Подробность сводки</label><output id="detailValue" for="summaryDetail"></output></div>
+          <input id="summaryDetail" type="range" min="0" max="2" step="1" value="1" aria-describedby="detailHint">
+          <div class="detail-labels" aria-hidden="true"><span data-i18n="detailBrief">Краткая</span><span data-i18n="detailStandard">Обычная</span><span data-i18n="detailDetailed">Подробная</span></div>
+          <p id="detailHint"></p>
         </section>
 
         <div class="options-stack">

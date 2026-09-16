@@ -7,6 +7,7 @@ const { runLocalProcess } = require("./local-process.cjs");
 const { MODELS, requireModels, localError } = require("./local-models.cjs");
 const { getExtractionInstructions } = require("./prompt.cjs");
 const { getLocalSummaryInstructions } = require("./local-prompt.cjs");
+const { detailInstructions, summaryBudget } = require("./summary-detail.cjs");
 const { splitAudio } = require("./audio.cjs");
 const { CancelledError } = require("./errors.cjs");
 
@@ -111,9 +112,10 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
         return parseWhisperResult(JSON.parse(await fs.readFile(`${prefix}.json`, "utf8")));
       } finally { await fs.rm(`${prefix}.json`, { force: true }).catch(() => {}); }
     },
-    async summarizeTranscript({ transcript, signal: requestSignal = signal, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
-      const instructions = getLocalSummaryInstructions(locale);
-      const finalBudget = LOCAL_CONTEXT - Buffer.byteLength(buildLocalPrompt(instructions, "")) - 2800 - 128;
+    async summarizeTranscript({ transcript, summaryDetail = "standard", signal: requestSignal = signal, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
+      const instructions = getLocalSummaryInstructions(locale) + "\n" + detailInstructions(transcript, summaryDetail, locale);
+      const outputTokens = Math.min(6000, Math.max(1400, Math.ceil(summaryBudget(transcript, summaryDetail).max * 0.8) + 400));
+      const finalBudget = LOCAL_CONTEXT - Buffer.byteLength(buildLocalPrompt(instructions, "")) - outputTokens - 128;
       let blocks = splitByBytes(transcript, Math.min(INPUT_BYTES, finalBudget));
       const total = blocks.length;
       if (blocks.length > 1) {
@@ -138,12 +140,12 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
         // Produce complete sectioned summaries of each batch instead of losing the end of the meeting.
         const summaries = [];
         const groups = splitByBytes(blocks.join("\n\n"), finalBudget);
-        for (let i = 0; i < groups.length; i++) summaries.push(`${locale === "en" ? "PART" : "ЧАСТЬ"} ${i + 1}\n` + await generate(instructions, groups[i], { signal: requestSignal, tokens: 2800 }));
+        for (let i = 0; i < groups.length; i++) summaries.push(`${locale === "en" ? "PART" : "ЧАСТЬ"} ${i + 1}\n` + await generate(instructions, groups[i], { signal: requestSignal, tokens: outputTokens }));
         return summaries.join("\n\n");
       }
       onProgress({ stage: "local-summary", percent: Math.round(progressEnd - 1),
         message: locale === "en" ? "Writing the summary on this computer…" : "Готовлю сводку на этом компьютере…" });
-      return generate(instructions, blocks.join("\n\n"), { signal: requestSignal, tokens: 2800 });
+      return generate(instructions, blocks.join("\n\n"), { signal: requestSignal, tokens: outputTokens });
     },
     async detectMeetingBoundaries({ utterances, signal: requestSignal = signal }) {
       const instructions = locale === "en"
