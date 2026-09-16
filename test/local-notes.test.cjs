@@ -54,12 +54,29 @@ test("malformed local output gets a bounded smaller-window retry and cannot sile
 
 test("empty substantive blocks are retried and cancellation stops the remaining local work", async () => {
   let calls = 0;
-  await assert.rejects(summarizeLocalNotes({ transcript: "Some business fact. ".repeat(180), generate: async () => { calls++; return output(); } }), { code: "LOCAL_EMPTY_SUMMARY" });
+  await assert.rejects(summarizeLocalNotes({ transcript: "Some business fact. ".repeat(180), generate: async () => { calls++; return output(); } }), { code: "LOCAL_INVALID_NOTES" });
   assert.ok(calls > 1 && calls < 10);
   const controller = new AbortController(); calls = 0;
   await assert.rejects(summarizeLocalNotes({ transcript: "Some fact. ".repeat(900), signal: controller.signal,
     generate: async () => { calls++; controller.abort(); return output(); } }), { code: "CANCELLED" });
   assert.equal(calls, 1);
+});
+
+test("an empty substantial middle window cannot silently vanish from an otherwise nonempty summary", async () => {
+  let calls = 0;
+  await assert.rejects(summarizeLocalNotes({ transcript: Array.from({ length: 32 }, (_, i) => `Topic ${i}: ${"Substantive business content. ".repeat(12)}`).join("\n"),
+    generate: async (_instructions, input) => {
+      calls++;
+      const rows = JSON.parse(input).lines;
+      return calls === 1 ? output(fact([rows[0].id])) : output();
+    } }), { code: "LOCAL_INVALID_NOTES" });
+  assert.ok(calls >= 3 && calls <= 4);
+});
+
+test("rendered local facts retain source timestamps for checking against the saved transcript", () => {
+  const rows = [{ id: 1, time: "00:12:00–00:12:10", text: "Order 600 if approved; otherwise order 300." }];
+  const result = renderNotes(parseNotes(output(fact([1], rows[0].text, "decision")), rows), "en");
+  assert.match(result, /Order 600 if approved; otherwise order 300\. \[00:12:00\]/);
 });
 
 test("detail selection retains commitments and draws supporting facts from different topics", () => {

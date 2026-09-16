@@ -119,16 +119,24 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", loc
   async function extract(core, retry = true) {
     checkCancelled();
     const context = contextRows(rows, core);
-    const output = await generate(instructions, JSON.stringify({ lines: core, context }), {
-      signal, tokens: 3200, schema: NOTE_SCHEMA, compact: true
-    });
+    let output;
+    try {
+      output = await generate(instructions, JSON.stringify({ lines: core, context }), {
+        signal, tokens: 3200, schema: NOTE_SCHEMA, compact: true
+      });
+    } catch (error) {
+      if (error.code !== "LOCAL_INVALID_NOTES") throw error;
+      if (!retry) throw invalid();
+    }
     checkCancelled();
     let parsed;
     try { parsed = parseNotes(output, [...core, ...context], core); }
     catch { if (!retry) throw invalid(); }
     // Malformed or unexpectedly empty output gets one bounded retry on smaller
     // source windows. Never substitute an invented summary or silently skip an error.
-    if ((!parsed || (!parsed.length && Buffer.byteLength(JSON.stringify(core)) > 1400)) && retry) {
+    const incomplete = !parsed || (!parsed.length && Buffer.byteLength(JSON.stringify(core)) > 1400);
+    if (incomplete && !retry) throw invalid();
+    if (incomplete && retry) {
       const middle = Math.ceil(core.length / 2);
       const pieces = core.length > 1 ? [core.slice(0, middle), core.slice(middle)] : [core];
       const recovered = [];
@@ -195,15 +203,19 @@ function renderNotes(notes, locale = "ru", budget = { level: "detailed", max: In
   const tasks = items.filter(item => item.kind === "task");
   const questions = items.filter(item => item.kind === "question");
   const nothing = en ? "None recorded." : "Не зафиксированы.";
-  const bullets = entries => entries.length ? entries.map(item => `- ${item.text}`).join("\n") : nothing;
+  const reference = item => {
+    const times = [...new Set((item.evidence || []).map(row => row.time?.split(/[–-]/)[0]).filter(Boolean))];
+    return times.length ? ` [${times.join(", ")}]` : "";
+  };
+  const bullets = entries => entries.length ? entries.map(item => `- ${item.text}${reference(item)}`).join("\n") : nothing;
   const owners = new Map();
   for (const item of tasks) {
     const owner = item.owner || (en ? "Owner not identified from the recording" : "Ответственный не установлен по записи");
     if (!owners.has(owner)) owners.set(owner, []);
     owners.get(owner).push(item);
   }
-  const overview = [(en ? "Meeting topics: " : "Темы встречи: ") + [...topics.values()].map(topic => topic.name).join("; ") + ".",
-    ...decisions.slice(0, budget.level === "detailed" ? 3 : 1).map(item => item.text)].join(" ");
+  const highlights = decisions.length ? decisions : tasks.length ? tasks : items;
+  const overview = bullets(highlights.slice(0, budget.level === "brief" ? 2 : 3));
   const discussion = [...topics.values()].filter(topic => topic.items.some(item => item.kind === "discussion"))
     .map((topic, index) => `${index + 1}. ${topic.name}\n${bullets(topic.items.filter(item => item.kind === "discussion"))}`).join("\n\n") || nothing;
   const outcome = [
