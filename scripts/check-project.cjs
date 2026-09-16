@@ -20,6 +20,8 @@ const requiredFiles = [
   "src/core/prompt.cjs",
   "src/core/locale.cjs",
   "src/core/local-engine.cjs",
+  "src/core/local-notes.cjs",
+  "src/core/summary-detail.cjs",
   "src/core/local-models.cjs",
   "src/core/local-process.cjs",
   "scripts/build-local-engines.cjs",
@@ -67,8 +69,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.3.0") {
-  throw new Error("Версия сборки должна быть 1.3.0.");
+if (packageJson.version !== "1.3.1") {
+  throw new Error("Версия сборки должна быть 1.3.1.");
 }
 
 const lockJson = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));

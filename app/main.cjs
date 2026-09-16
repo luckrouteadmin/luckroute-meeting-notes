@@ -19,6 +19,7 @@ const {
 } = require("../src/core/workflow.cjs");
 const { toUserError, CancelledError } = require("../src/core/errors.cjs");
 const { normalizeLocale, translate } = require("../src/core/locale.cjs");
+const { normalizeSummaryDetail } = require("../src/core/summary-detail.cjs");
 const { createLocalEngine } = require("../src/core/local-engine.cjs");
 const { downloadModels, getModelStatus } = require("../src/core/local-models.cjs");
 
@@ -50,10 +51,10 @@ function updateSettings(change) {
 
 function createWindow(locale = "ru") {
   mainWindow = new BrowserWindow({
-    width: 920,
-    height: 900,
-    minWidth: 760,
-    minHeight: 760,
+    width: 820,
+    height: 820,
+    minWidth: 700,
+    minHeight: 640,
     show: false,
     title: translate(locale, "appTitle"),
     backgroundColor: "#f3f9fc",
@@ -199,6 +200,7 @@ function registerIpcHandlers() {
       version: app.getVersion(),
       hasApiKey,
       mode: hasApiKey && settings.mode === "openai" ? "openai" : "local",
+      summaryDetail: normalizeSummaryDetail(settings.summaryDetail),
       localModels: await getModelStatus(modelDirectory()),
       platform: process.platform,
       locale,
@@ -211,6 +213,13 @@ function registerIpcHandlers() {
     if (mode === "openai" && !await getApiKey()) return { ok: false, code: "API_KEY_REQUIRED" };
     await updateSettings((settings) => { settings.mode = mode; });
     return { ok: true, mode };
+  });
+
+  ipcMain.handle("settings:set-summary-detail", async (_event, value) => {
+    if (activeJob || modelDownload) return { ok: false };
+    const summaryDetail = normalizeSummaryDetail(value);
+    await updateSettings(settings => { settings.summaryDetail = summaryDetail; });
+    return { ok: true, summaryDetail };
   });
 
   ipcMain.handle("local:download-models", async (event) => {
@@ -326,6 +335,7 @@ function registerIpcHandlers() {
         outputDirectory: options?.outputDirectory,
         identifySpeakers: true,
         splitMeetings: options?.splitMeetings === true,
+        summaryDetail: normalizeSummaryDetail(options?.summaryDetail),
         locale,
         mode,
         localEngine,

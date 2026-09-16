@@ -8,7 +8,7 @@ The installer bundles native executables built from the following pinned upstrea
 Model weights are not included in the installer. They are downloaded only when the user explicitly requests local model setup:
 
 - Whisper small: https://huggingface.co/ggerganov/whisper.cpp — converted OpenAI Whisper weights; MIT. Original: https://github.com/openai/whisper.
-- Qwen3-4B Q4_K_M: https://huggingface.co/Qwen/Qwen3-4B-GGUF — Apache License 2.0. License: https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/main/LICENSE.
+- Qwen3.5-9B Q4_K_M: https://huggingface.co/unsloth/Qwen3.5-9B-GGUF — Unsloth GGUF conversion of https://huggingface.co/Qwen/Qwen3.5-9B, Apache License 2.0. License: https://huggingface.co/Qwen/Qwen3.5-9B/blob/main/LICENSE.
 
 Pinned model revisions, sizes and SHA-256 hashes are in `src/core/local-models.cjs`. These are inference-only weights: no remote model code is executed. Initial downloads contact Hugging Face and its CDN; local meeting processing makes no network calls.
 
