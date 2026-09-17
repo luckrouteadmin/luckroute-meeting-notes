@@ -78,6 +78,31 @@ test("completed native processes leave no armed deadline", async (t) => {
   assert.equal(await operation, "done");
   t.mock.timers.tick(1000);
 });
+test("recognition progress handles split stderr lines without exposing source text or invalid percentages", async () => {
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = () => assert.fail("unexpected termination");
+  const progress = [];
+  const operation = runLocalProcess("whisper", [], { spawnImpl: () => child, onWhisperProgress: value => progress.push(value) });
+  child.stderr.write("private source text\nwhisper_print_progress_callback: pro");
+  child.stderr.write("gress =   5%\nwhisper_print_progress_callback: progress = 999%\n");
+  child.stderr.write("whisper_print_progress_callback: progress =   5%\nwhisper_print_progress_callback: progress =  50%\n");
+  child.stderr.write("private whisper_print_progress_callback: progress =  90%\n");
+  child.stdout.write("result"); child.emit("close", 0);
+  assert.equal(await operation, "result");
+  assert.deepEqual(progress, [5, 50]);
+});
+test("a failed progress observer stops the native child without an uncaught event exception", async () => {
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  let killed = false;
+  child.kill = () => { killed = true; };
+  const error = new Error("progress destination closed");
+  const operation = runLocalProcess("whisper", [], { spawnImpl: () => child, onWhisperProgress: () => { throw error; } });
+  child.stderr.write("whisper_print_progress_callback: progress =  10%\n");
+  assert.equal(killed, true);
+  const observed = assert.rejects(operation, error);
+  child.emit("close", null);
+  await observed;
+});
 test("cancellation waits for child close before allowing file cleanup; shell is disabled", async () => {
   const controller = new AbortController();
   const child = new EventEmitter();
@@ -102,17 +127,20 @@ test("local workflow never invokes cloud transcription, summary, boundaries, or 
   const video = path.join(directory, "call.mov");
   await fs.writeFile(video, "fixture");
   const forbidden = () => assert.fail("A cloud capability was called in local mode");
-  const result = await runMeetingWorkflow({ videoPaths: [video], outputDirectory: directory,
+  const progress = [];
+  const result = await runMeetingWorkflow({ videoPaths: [video], outputDirectory: directory, onProgress: event => progress.push(event),
     mode: "local", summaryDetail: "brief", identifySpeakers: true, splitMeetings: true, apiKey: "must-not-leak", fetchImpl: forbidden,
     dependencies: { transcribeAudioFile: forbidden, summarizeTranscript: forbidden, identifySpeakersFromFrames: forbidden, identifySpeakersFromContext: forbidden, extractSpeakerFrames: forbidden, detectMeetingBoundaries: forbidden },
     localEngine: {
       splitAudio: async () => ["local.wav"],
-      transcribeAudioFile: async (options) => { assert.equal(options.apiKey, undefined); assert.equal(options.fetchImpl, undefined); return { text: "Решили запустить проект.", segments: [{ start: 0, end: 3, text: "Решили запустить проект." }] }; },
+      transcribeAudioFile: async (options) => { assert.equal(options.apiKey, undefined); assert.equal(options.fetchImpl, undefined); for (const percent of [50, 20, 100]) options.onProgress(percent); return { text: "Решили запустить проект.", segments: [{ start: 0, end: 3, text: "Решили запустить проект." }] }; },
       summarizeTranscript: async ({ summaryDetail }) => { assert.equal(summaryDetail, "brief"); return "ПРИНЯТЫЕ РЕШЕНИЯ\nЗапустить проект."; },
       detectMeetingBoundaries: async () => [{ start_segment_id: 1, end_segment_id: 1, title: "Созвон" }]
     }
   });
   assert.equal(result.mode, "local"); assert.equal(result.files.length, 2);
+  const transcriptionProgress = progress.filter(event => event.stage === "transcription");
+  assert.deepEqual(transcriptionProgress.map(event => event.percent), [12, 34, 34, 55]);
   assert.match(await fs.readFile(result.transcriptPath, "utf8"), /Обработано локально/);
   assert.equal(result.identifiedSpeakerCount, 0);
   await assert.rejects(runMeetingWorkflow({ mode: "local" }), /Local engine is not ready/);

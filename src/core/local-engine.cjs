@@ -111,18 +111,18 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
 
   return {
     splitAudio: (options) => splitAudio({ ...options, format: "wav" }),
-    async transcribeAudioFile({ filePath, signal: requestSignal = signal }) {
+    async transcribeAudioFile({ filePath, signal: requestSignal = signal, onProgress = () => {} }) {
       const prefix = `${filePath}.transcript`;
       try {
         const args = ["-m", path.join(modelDirectory, MODELS[0].file), "-f", filePath,
-          "-l", "auto", "-t", String(threads), "-oj", "-of", prefix, "-np"];
+          "-l", "auto", "-t", String(threads), "-oj", "-of", prefix, "-np", "-pp"];
         // CPU works on both platforms; no dependency on CUDA, external Python, or a local server.
         if (!useGpu) args.push("-ng");
-        try { await runProcess(whisper, args, { signal: requestSignal, locale, timeoutMs: (useGpu ? 5 : 30) * MINUTE }); }
+        try { await runProcess(whisper, args, { signal: requestSignal, locale, onWhisperProgress: onProgress, timeoutMs: (useGpu ? 5 : 30) * MINUTE }); }
         catch (error) {
           if (!canRetryOnCpu(error, requestSignal)) throw error;
           useGpu = false;
-          await runProcess(whisper, [...args, "-ng"], { signal: requestSignal, locale, timeoutMs: 30 * MINUTE });
+          await runProcess(whisper, [...args, "-ng"], { signal: requestSignal, locale, onWhisperProgress: onProgress, timeoutMs: 30 * MINUTE });
         }
         return parseWhisperResult(JSON.parse(await fs.readFile(`${prefix}.json`, "utf8")));
       } finally { await fs.rm(`${prefix}.json`, { force: true }).catch(() => {}); }

@@ -13,7 +13,7 @@ function engineEnvironment(source = process.env) {
   return result;
 }
 
-function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs = 30 * 60 * 1000, maxOutputBytes = 8 * 1024 * 1024, spawnImpl = spawn } = {}) {
+function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs = 30 * 60 * 1000, maxOutputBytes = 8 * 1024 * 1024, onWhisperProgress, spawnImpl = spawn } = {}) {
   if (signal?.aborted) return Promise.reject(new CancelledError());
   return new Promise((resolve, reject) => {
     const child = spawnImpl(binary, args, { cwd, windowsHide: true, shell: false,
@@ -51,8 +51,28 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs =
         child.kill("SIGKILL");
       } else chunks.push(chunk);
     });
-    // Engines may echo transcript/prompt text to stderr. Drain but never log it.
-    child.stderr.on("data", () => {});
+    // Engines may echo private source text. Only expose the recognizer's numeric
+    // progress protocol, never arbitrary diagnostics or incomplete stderr lines.
+    let pendingDiagnostic = "", lastProgress = -1;
+    child.stderr.on("data", chunk => {
+      if (!onWhisperProgress || stoppedError || settled) return;
+      pendingDiagnostic += chunk.toString("utf8");
+      const lines = pendingDiagnostic.split(/\r?\n/);
+      pendingDiagnostic = lines.pop().slice(-1024);
+      for (const line of lines) {
+        const match = /^whisper_print_progress_callback: progress =\s*(\d{1,3})%$/.exec(line);
+        const percent = match ? Number(match[1]) : -1;
+        if (percent > lastProgress && percent <= 100) {
+          lastProgress = percent;
+          try { onWhisperProgress(percent); }
+          catch (error) {
+            stoppedError = error;
+            child.kill("SIGKILL");
+            break;
+          }
+        }
+      }
+    });
     child.once("error", () => finish(localError("LOCAL_ENGINE_MISSING",
       "Не удалось запустить встроенный локальный движок. Переустановите программу.",
       "The bundled local engine could not start. Reinstall the app.", locale)));
