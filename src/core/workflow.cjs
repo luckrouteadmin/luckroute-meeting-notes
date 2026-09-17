@@ -220,9 +220,10 @@ async function runMeetingWorkflow({
     for (const group of chunkGroups) {
       for (let chunkIndex = 0; chunkIndex < group.chunks.length; chunkIndex += 1) {
         if (signal?.aborted) throw new CancelledError(undefined, normalizedLocale);
-        const progressPercent = 12 + Math.round(((completedChunks + 1) / totalChunks) * 43);
+        let progressPercent = 12 + Math.round((completedChunks / totalChunks) * 43);
         const checkpointKey = `${group.sourceIndex}:${chunkIndex}`;
         let result = checkpoint.get(checkpointKey);
+        if (result) progressPercent = 12 + Math.round(((completedChunks + 1) / totalChunks) * 43);
         onProgress({
           stage: result ? "transcription-restored" : "transcription",
           percent: progressPercent,
@@ -239,6 +240,13 @@ async function runMeetingWorkflow({
             signal,
             fetchImpl,
             locale: normalizedLocale,
+            onProgress: percent => {
+              if (!Number.isFinite(percent) || percent < 0 || percent > 100) return;
+              // A CPU retry can start at zero; the overall bar must not go back.
+              progressPercent = Math.max(progressPercent, 12 + Math.round(((completedChunks + percent / 100) / totalChunks) * 43));
+              onProgress({ stage: "transcription", percent: progressPercent,
+                message: translate(normalizedLocale, "transcribing", { current: completedChunks + 1, total: totalChunks }) + ` (${Math.round(percent)}%)` });
+            },
             onRetry: retryProgress(
               onProgress,
               progressPercent,

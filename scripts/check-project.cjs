@@ -68,8 +68,8 @@ if (packageJson.build?.mac?.identity !== "-" || packageJson.build?.mac?.sign !==
   throw new Error("macOS-сборка должна получать проверяемую ad-hoc-подпись без сертификата.");
 }
 
-if (packageJson.version !== "1.3.1") {
-  throw new Error("Версия сборки должна быть 1.3.1.");
+if (packageJson.version !== "1.3.2") {
+  throw new Error("Версия сборки должна быть 1.3.2.");
 }
 
 const lockJson = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
