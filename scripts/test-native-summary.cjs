@@ -7,6 +7,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { MODELS, downloadModels, requireModels } = require("../src/core/local-models.cjs");
 const { createLocalEngine } = require("../src/core/local-engine.cjs");
+const { runLocalProcess } = require("../src/core/local-process.cjs");
+const { spawn } = require("node:child_process");
 
 async function main() {
   // Exercise real Unicode model paths too, particularly the Windows loader.
@@ -24,7 +26,24 @@ async function main() {
   } });
   console.log("Model download and integrity verification complete.");
   const engine = await createLocalEngine({ modelDirectory, binaryDirectory: path.resolve("resources/local", `${process.platform}-${process.arch}`), locale: "en",
-    verify: (directory, options) => requireModels(directory, { ...options, models }) });
+    verify: (directory, options) => requireModels(directory, { ...options, models }),
+    runProcess: async (binary, args, options) => {
+      const started = Date.now();
+      console.log(`Native inference: context=${args[args.indexOf("-c") + 1]}, gpuLayers=${args[args.indexOf("-ngl") + 1]}, timeout=${options.timeoutMs}ms.`);
+      try {
+        return await runLocalProcess(binary, args, { ...options, spawnImpl: (command, argv, settings) => {
+          const child = spawn(command, argv, settings);
+          // This script only uses the synthetic fixture below. Production still
+          // drains stderr privately; never add this logger to the application.
+          let logged = 0;
+          child.stderr.on("data", chunk => {
+            if (logged < 32000) process.stderr.write(chunk.subarray(0, 32000 - logged));
+            logged += chunk.length;
+          });
+          return child;
+        } });
+      } finally { console.log(`Native attempt ended after ${Math.round((Date.now() - started) / 1000)}s.`); }
+    } });
   const transcript = [
     "[00:00:00–00:00:30] Speaker: Cedar project: we agreed to ship the pilot on Monday. Maya will test the sample on Friday.",
     "[00:00:30–00:01:00] Speaker: For Cedar, order 600 units if the sample passes; otherwise order 300 units. Keep both conditions in the plan.",

@@ -10,6 +10,16 @@ const { splitAudio } = require("./audio.cjs");
 
 const LOCAL_CONTEXT = 16384;
 const INPUT_BYTES = 11000;
+const MINUTE = 60 * 1000;
+
+function contextForPrompt(prompt, tokens, locale = "ru") {
+  // UTF-8 byte length bounds the input token count from above. Include generation and
+  // special-token headroom, but do not allocate a maximum-size KV cache for tiny inputs.
+  const required = Buffer.byteLength(prompt) + tokens + 128;
+  if (required > LOCAL_CONTEXT) throw localError("LOCAL_CONTEXT_LIMIT",
+    "Слишком большой фрагмент для локальной модели.", "Input exceeds the local model context.", locale);
+  return Math.max(2048, Math.ceil(required / 512) * 512);
+}
 
 function splitByBytes(text, limit = INPUT_BYTES) {
   const chunks = [];
@@ -50,18 +60,18 @@ function parseWhisperResult(value) {
   return { text: segments.map((s) => s.text).join(" "), segments };
 }
 
-function buildLlamaArgs({ model, promptFile, threads, useGpu = false, tokens = 2400, schemaFile }) {
-  return ["-m", model, "-f", promptFile, "-c", String(LOCAL_CONTEXT), "-n", String(tokens),
+function buildLlamaArgs({ model, promptFile, threads, useGpu = false, tokens = 2400, schemaFile, contextSize = LOCAL_CONTEXT, batchSize = 256 }) {
+  return ["-m", model, "-f", promptFile, "-c", String(contextSize), "-n", String(tokens),
     "-t", String(threads), "-ngl", useGpu ? "99" : "0", "--offline", "--no-conversation",
     "--no-display-prompt", "--simple-io", "--color", "off", "--no-context-shift", "--no-escape",
     "--temp", "0.3", "--top-p", "0.8", "--top-k", "20", "--min-p", "0",
-    "--presence-penalty", "0", "--seed", "42", "-b", "256", "-ub", "128",
+    "--presence-penalty", "0", "--seed", "42", "-b", String(batchSize), "-ub", String(Math.min(128, batchSize)),
     ...(schemaFile ? ["--json-schema-file", schemaFile] : [])];
 }
 
-async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru", signal, runProcess = runLocalProcess, verify = requireModels }) {
+async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru", signal, runProcess = runLocalProcess, verify = requireModels, platform = process.platform, architecture = process.arch }) {
   await verify(modelDirectory, { signal, locale });
-  const extension = process.platform === "win32" ? ".exe" : "";
+  const extension = platform === "win32" ? ".exe" : "";
   const whisper = path.join(binaryDirectory, `whisper-cli${extension}`);
   const llama = path.join(binaryDirectory, `llama-completion${extension}`);
   for (const binary of [whisper, llama]) {
@@ -70,26 +80,28 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
     }
   }
   const threads = Math.max(1, Math.min(8, (os.availableParallelism?.() || os.cpus().length) - 1));
-  const useGpu = process.platform === "darwin" && process.arch === "arm64";
+  let useGpu = platform === "darwin" && architecture === "arm64";
+  const batchSize = os.totalmem() < 10 * 1024 ** 3 ? 64 : 256;
+  const canRetryOnCpu = (error, requestSignal) => useGpu && !requestSignal?.aborted
+    && ["LOCAL_ENGINE_FAILED", "LOCAL_ENGINE_TIMEOUT"].includes(error.code);
 
-  async function generate(instructions, input, { signal: requestSignal = signal, tokens = 2400, schema, compact = false } = {}) {
+  async function generate(instructions, input, { signal: requestSignal = signal, tokens = 2400, schema, compact = false, onFallback = () => {} } = {}) {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "luckroute-local-"));
     try {
       const promptFile = path.join(temporary, "prompt.txt");
       const prompt = buildLocalPrompt(instructions, input, compact);
-      // UTF-8 byte length is a conservative token upper bound. Never silently truncate input.
-      if (Buffer.byteLength(prompt) + tokens + 128 > LOCAL_CONTEXT) {
-        throw localError("LOCAL_CONTEXT_LIMIT", "Слишком большой фрагмент для локальной модели.", "Input exceeds the local model context.", locale);
-      }
+      const contextSize = contextForPrompt(prompt, tokens, locale);
       await fs.writeFile(promptFile, prompt, { mode: 0o600, encoding: "utf8" });
       const schemaFile = schema ? path.join(temporary, "schema.json") : undefined;
       if (schema) await fs.writeFile(schemaFile, JSON.stringify(schema), { mode: 0o600 });
-      const settings = { schemaFile, model: path.join(modelDirectory, MODELS[1].file), promptFile, threads, useGpu, tokens };
+      const settings = { schemaFile, model: path.join(modelDirectory, MODELS[1].file), promptFile, threads, useGpu, tokens, contextSize, batchSize };
       let output;
-      try { output = await runProcess(llama, buildLlamaArgs(settings), { signal: requestSignal, cwd: temporary, locale }); }
+      try { output = await runProcess(llama, buildLlamaArgs(settings), { signal: requestSignal, cwd: temporary, locale, timeoutMs: (useGpu ? 3 : 15) * MINUTE }); }
       catch (error) {
-        if (!useGpu || requestSignal?.aborted || error.code !== "LOCAL_ENGINE_FAILED") throw error;
-        output = await runProcess(llama, buildLlamaArgs({ ...settings, useGpu: false }), { signal: requestSignal, cwd: temporary, locale });
+        if (!canRetryOnCpu(error, requestSignal)) throw error;
+        useGpu = false; // Do not retry a failing accelerator for every subsequent fragment.
+        onFallback();
+        output = await runProcess(llama, buildLlamaArgs({ ...settings, useGpu: false }), { signal: requestSignal, cwd: temporary, locale, timeoutMs: 15 * MINUTE });
       }
       const result = cleanCompletion(output);
       if (!result) throw localError("LOCAL_EMPTY_SUMMARY", "Локальная модель вернула пустой ответ. Расшифровка сохранена.", "The local model returned an empty answer. Your transcript is saved.", locale);
@@ -106,10 +118,11 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
           "-l", "auto", "-t", String(threads), "-oj", "-of", prefix, "-np"];
         // CPU works on both platforms; no dependency on CUDA, external Python, or a local server.
         if (!useGpu) args.push("-ng");
-        try { await runProcess(whisper, args, { signal: requestSignal, locale }); }
+        try { await runProcess(whisper, args, { signal: requestSignal, locale, timeoutMs: (useGpu ? 5 : 30) * MINUTE }); }
         catch (error) {
-          if (!useGpu || requestSignal?.aborted || error.code !== "LOCAL_ENGINE_FAILED") throw error;
-          await runProcess(whisper, [...args, "-ng"], { signal: requestSignal, locale });
+          if (!canRetryOnCpu(error, requestSignal)) throw error;
+          useGpu = false;
+          await runProcess(whisper, [...args, "-ng"], { signal: requestSignal, locale, timeoutMs: 30 * MINUTE });
         }
         return parseWhisperResult(JSON.parse(await fs.readFile(`${prefix}.json`, "utf8")));
       } finally { await fs.rm(`${prefix}.json`, { force: true }).catch(() => {}); }
@@ -155,4 +168,4 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
   };
 }
 
-module.exports = { createLocalEngine, parseWhisperResult, buildLlamaArgs, buildLocalPrompt, cleanCompletion, splitByBytes };
+module.exports = { createLocalEngine, parseWhisperResult, buildLlamaArgs, buildLocalPrompt, cleanCompletion, splitByBytes, contextForPrompt };

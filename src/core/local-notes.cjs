@@ -113,6 +113,7 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", loc
   const rows = transcriptRows(transcript);
   const blocks = splitRows(rows);
   const notes = [];
+  let currentPercent = progressStart;
   const instructions = noteInstructions(locale, summaryDetail);
   const checkCancelled = () => { if (signal?.aborted) throw new CancelledError(); };
   const invalid = () => localError("LOCAL_INVALID_NOTES",
@@ -124,7 +125,10 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", loc
     let output;
     try {
       output = await generate(instructions, JSON.stringify({ lines: core, context }), {
-        signal, tokens: 3200, schema: NOTE_SCHEMA, compact: true
+        signal, tokens: 3200, schema: NOTE_SCHEMA, compact: true,
+        onFallback: () => onProgress({ stage: "local-summary", percent: currentPercent,
+          message: locale === "en" ? "Hardware acceleration failed or timed out. Retrying this part on the CPU…"
+            : "Аппаратное ускорение завершилось с ошибкой или превысило время ожидания. Повторяю эту часть на процессоре…" })
       });
     } catch (error) {
       if (error.code !== "LOCAL_INVALID_NOTES") throw error;
@@ -149,7 +153,8 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", loc
   }
   for (let i = 0; i < blocks.length; i++) {
     checkCancelled();
-    onProgress({ stage: "local-summary", percent: Math.round(progressStart + (progressEnd - progressStart) * i / blocks.length),
+    currentPercent = Math.round(progressStart + (progressEnd - progressStart) * i / blocks.length);
+    onProgress({ stage: "local-summary", percent: currentPercent,
       message: locale === "en" ? `Local analysis: part ${i + 1} of ${blocks.length}` : `Локальный разбор: часть ${i + 1} из ${blocks.length}` });
     notes.push(...await extract(blocks[i]));
   }

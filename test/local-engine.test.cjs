@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
-const { createLocalEngine, parseWhisperResult, buildLlamaArgs, buildLocalPrompt, cleanCompletion, splitByBytes } = require("../src/core/local-engine.cjs");
+const { createLocalEngine, parseWhisperResult, buildLlamaArgs, buildLocalPrompt, cleanCompletion, splitByBytes, contextForPrompt } = require("../src/core/local-engine.cjs");
 const { runLocalProcess, engineEnvironment } = require("../src/core/local-process.cjs");
 const { runMeetingWorkflow } = require("../src/core/workflow.cjs");
 const { fingerprintVideos } = require("../src/core/checkpoint.cjs");
@@ -46,6 +46,37 @@ test("Qwen prompt neutralizes injected role tokens and skips thinking output", (
   assert.equal((prompt.match(/<\|im_start\|>/g) || []).length, 3);
   assert.ok(prompt.endsWith("<think>\n\n</think>\n\n"));
   assert.equal(cleanCompletion("<think>private analysis</think>Summary<|im_end|>"), "Summary");
+});
+test("small prompts do not reserve the maximum cache, while UTF-8 input and generation always fit", () => {
+  for (const text of ["Hello", "Подробное обсуждение. ".repeat(220), "🦆".repeat(1000)]) {
+    const size = contextForPrompt(text, 3200);
+    assert.ok(size >= Buffer.byteLength(text) + 3200 + 128);
+    assert.ok(size <= 16384);
+  }
+  assert.ok(contextForPrompt("Short English fixture", 3200) < 8192);
+  assert.throws(() => contextForPrompt("я".repeat(8000), 3200), { code: "LOCAL_CONTEXT_LIMIT" });
+});
+test("a native deadline kills the child and waits for close before exposing the timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  let killed = false, settled = false;
+  child.kill = signal => { assert.equal(signal, "SIGKILL"); killed = true; };
+  const operation = runLocalProcess("engine", [], { timeoutMs: 100, spawnImpl: () => child });
+  const observed = operation.catch(error => { settled = true; assert.equal(error.code, "LOCAL_ENGINE_TIMEOUT"); });
+  t.mock.timers.tick(100);
+  await new Promise(setImmediate);
+  assert.equal(killed, true); assert.equal(settled, false);
+  child.emit("close", null);
+  await observed;
+});
+test("completed native processes leave no armed deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = () => assert.fail("deadline ran after child completion");
+  const operation = runLocalProcess("engine", [], { timeoutMs: 100, spawnImpl: () => child });
+  child.stdout.write("done"); child.emit("close", 0);
+  assert.equal(await operation, "done");
+  t.mock.timers.tick(1000);
 });
 test("cancellation waits for child close before allowing file cleanup; shell is disabled", async () => {
   const controller = new AbortController();
@@ -120,4 +151,39 @@ test("native engine adapter reads Whisper JSON and a local summary, then deletes
   await engine.summarizeTranscript({ transcript: "Ship Monday", summaryDetail: "detailed" });
   assert.match(summaryRequests.at(-1).prompt, /Include technical details/);
   await assert.rejects(fs.stat(promptFile), { code: "ENOENT" });
+});
+
+test("a timed-out Apple accelerator retries once on CPU and stays disabled for later fragments", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "fallback-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  for (const name of ["whisper-cli", "llama-completion"]) await fs.writeFile(path.join(directory, name), "fixture");
+  const attempts = [], progress = [];
+  const engine = await createLocalEngine({ modelDirectory: directory, binaryDirectory: directory,
+    platform: "darwin", architecture: "arm64", locale: "en", verify: async () => {},
+    runProcess: async (_binary, args, options) => {
+      const prompt = args[args.indexOf("-f") + 1];
+      await fs.access(prompt); // CPU retry must still have its input.
+      attempts.push({ gpu: args[args.indexOf("-ngl") + 1], timeout: options.timeoutMs, context: Number(args[args.indexOf("-c") + 1]) });
+      if (attempts.length === 1) throw Object.assign(new Error("stalled"), { code: "LOCAL_ENGINE_TIMEOUT" });
+      return JSON.stringify({ items: [{ kind: "decision", topic: "Release", text: "Ship Monday.", source_ids: [1], owner: null }] });
+    } });
+  await engine.summarizeTranscript({ transcript: "Ship Monday.", onProgress: event => progress.push(event) });
+  await engine.summarizeTranscript({ transcript: "Ship Monday." });
+  assert.deepEqual(attempts.map(attempt => attempt.gpu), ["99", "0", "0"]);
+  assert.ok(attempts[0].timeout < attempts[1].timeout);
+  assert.ok(attempts.every(attempt => attempt.timeout > 0 && attempt.timeout < 25 * 60 * 1000 && attempt.context < 8192));
+  assert.ok(progress.some(event => /Retrying this part on the CPU/.test(event.message)));
+  assert.ok(progress.every((event, i) => !i || event.percent >= progress[i - 1].percent));
+});
+
+test("cancelling Apple inference never starts a CPU retry", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cancel-fallback-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  for (const name of ["whisper-cli", "llama-completion"]) await fs.writeFile(path.join(directory, name), "fixture");
+  const controller = new AbortController(); let calls = 0;
+  const engine = await createLocalEngine({ modelDirectory: directory, binaryDirectory: directory,
+    platform: "darwin", architecture: "arm64", signal: controller.signal, verify: async () => {},
+    runProcess: async () => { calls++; controller.abort(); throw Object.assign(new Error("cancelled"), { code: "CANCELLED" }); } });
+  await assert.rejects(engine.summarizeTranscript({ transcript: "Ship Monday." }), { code: "CANCELLED" });
+  assert.equal(calls, 1);
 });

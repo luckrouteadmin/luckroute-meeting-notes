@@ -13,7 +13,7 @@ function engineEnvironment(source = process.env) {
   return result;
 }
 
-function runLocalProcess(binary, args, { signal, cwd, locale = "ru", maxOutputBytes = 8 * 1024 * 1024, spawnImpl = spawn } = {}) {
+function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs = 30 * 60 * 1000, maxOutputBytes = 8 * 1024 * 1024, spawnImpl = spawn } = {}) {
   if (signal?.aborted) return Promise.reject(new CancelledError());
   return new Promise((resolve, reject) => {
     const child = spawnImpl(binary, args, { cwd, windowsHide: true, shell: false,
@@ -22,15 +22,28 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", maxOutputBy
     let bytes = 0;
     let stoppedError = null;
     let settled = false;
+    let deadline;
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       error ? reject(error) : resolve(value);
     };
     const abort = () => { stoppedError = new CancelledError(); child.kill("SIGKILL"); };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
+    if (timeoutMs > 0) {
+      deadline = setTimeout(() => {
+        if (settled || stoppedError) return;
+        stoppedError = localError("LOCAL_ENGINE_TIMEOUT",
+          "Локальный движок слишком долго обрабатывает фрагмент. Закройте тяжёлые приложения и повторите обработку.",
+          "The local engine took too long to process a fragment. Close memory-intensive apps and retry.", locale);
+        // Resolve only on close: a CPU retry must not overlap the old process.
+        child.kill("SIGKILL");
+      }, timeoutMs);
+      deadline.unref?.();
+    }
     child.stdout.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > maxOutputBytes) {
