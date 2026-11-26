@@ -102,7 +102,7 @@ jobs:
             Start-Sleep -Seconds (10 * $attempt)
           }
           exit 1
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Meeting-Notes-Windows-x64
           path: dist/*.exe
@@ -154,7 +154,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
           codesign -dv --verbose=4 "$app_path" 2>&1 | grep -q 'Signature=adhoc'
           codesign -d --entitlements :- "$app_path" 2>&1 | grep -q 'com.apple.security.cs.disable-library-validation'
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Meeting-Notes-macOS-Apple-Silicon
           path: dist/*.dmg
@@ -222,7 +222,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: release/*
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Meeting-Notes-${{ needs.preflight.outputs.version }}-release-assets
           path: release/*
