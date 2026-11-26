@@ -215,3 +215,59 @@ test("cancelling Apple inference never starts a CPU retry", async (t) => {
   await assert.rejects(engine.summarizeTranscript({ transcript: "Ship Monday." }), { code: "CANCELLED" });
   assert.equal(calls, 1);
 });
+
+for (const engine of ["whisper", "llama"]) {
+  test(engine + " can progress beyond the initial deadline and still times out on a stall", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let kills = 0;
+    child.kill = () => { kills++; };
+    const operation = runLocalProcess(engine, [], {
+      timeoutMs: 100, spawnImpl: () => child,
+      onWhisperProgress: engine === "whisper" ? () => {} : undefined
+    });
+    for (const percent of [10, 20, 30]) {
+      t.mock.timers.tick(80);
+      if (engine === "whisper") child.stderr.write("whisper_print_progress_callback: progress = " + percent + "%\r");
+      else child.stdout.write("token");
+      assert.equal(kills, 0);
+    }
+    t.mock.timers.tick(80);
+    if (engine === "whisper") child.stderr.write("whisper_print_progress_callback: progress = 30%\n");
+    t.mock.timers.tick(20);
+    assert.equal(kills, 1);
+    child.emit("close", null);
+    await assert.rejects(operation, { code: "LOCAL_ENGINE_TIMEOUT" });
+  });
+}
+
+test("two-minute local chunks have matching timestamps and a distinct resume fingerprint", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "local-offset-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const video = path.join(directory, "Запись + пробел.mov");
+  await fs.writeFile(video, "fixture");
+  let configuration;
+  const result = await runMeetingWorkflow({
+    mode: "local", videoPaths: [video], outputDirectory: directory,
+    dependencies: { openCheckpoint: async options => {
+      configuration = options.configuration;
+      return { get: () => null, set: async () => {}, remove: async () => {} };
+    } },
+    localEngine: {
+      chunkSeconds: 120,
+      splitAudio: async ({ chunkSeconds }) => {
+        assert.equal(chunkSeconds, 120);
+        return ["one.wav", "two.wav"];
+      },
+      transcribeAudioFile: async ({ filePath }) => ({
+        text: filePath, segments: [{ start: 1, end: 2, text: filePath }]
+      }),
+      summarizeTranscript: async () => "Готово.",
+      detectMeetingBoundaries: async () => []
+    }
+  });
+  assert.equal(configuration.chunkSeconds, 120);
+  assert.match(await fs.readFile(result.transcriptPath, "utf8"), /00:02:01.*two\.wav/);
+});

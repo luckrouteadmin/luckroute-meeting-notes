@@ -87,3 +87,15 @@ test("detail selection retains commitments and draws supporting facts from diffe
   assert.ok(detailed.length > brief.length);
   for (const text of ["Topic 0", "Topic 1", "Topic 2", "Order 600 if approved; otherwise order 300."]) assert.ok(brief.includes(text));
 });
+
+test("CPU summary splits a stalled block and processes both halves", async () => {
+  const windows = [];
+  await summarizeLocalNotes({ transcript: "Alpha.\nBeta.", locale: "en",
+    generate: async (_instructions, input) => {
+      const ids = JSON.parse(input).lines.map(row => row.id);
+      windows.push(ids);
+      if (ids.length > 1) throw Object.assign(new Error("stalled"), { code: "LOCAL_ENGINE_TIMEOUT" });
+      return JSON.stringify({ items: [{ kind: "discussion", topic: "Test", text: "Fact", owner: null, source_ids: ids }] });
+    } });
+  assert.deepEqual(windows, [[1, 2], [1], [2]]);
+});

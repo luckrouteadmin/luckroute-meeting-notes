@@ -81,7 +81,8 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
   }
   const threads = Math.max(1, Math.min(8, (os.availableParallelism?.() || os.cpus().length) - 1));
   let useGpu = platform === "darwin" && architecture === "arm64";
-  const batchSize = os.totalmem() < 10 * 1024 ** 3 ? 64 : 256;
+  const constrained = os.totalmem() < 10 * 1024 ** 3 || os.freemem() < 3 * 1024 ** 3 || threads <= 3;
+  const batchSize = constrained ? 64 : 256;
   const canRetryOnCpu = (error, requestSignal) => useGpu && !requestSignal?.aborted
     && ["LOCAL_ENGINE_FAILED", "LOCAL_ENGINE_TIMEOUT"].includes(error.code);
 
@@ -110,6 +111,7 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
   }
 
   return {
+    chunkSeconds: platform === "win32" || constrained ? 120 : undefined,
     splitAudio: (options) => splitAudio({ ...options, format: "wav" }),
     async transcribeAudioFile({ filePath, signal: requestSignal = signal, onProgress = () => {} }) {
       const prefix = `${filePath}.transcript`;
@@ -129,7 +131,7 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
     },
     async summarizeTranscript({ transcript, summaryDetail = "standard", signal: requestSignal = signal, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
       return summarizeLocalNotes({ transcript, summaryDetail, locale, signal: requestSignal,
-        generate, onProgress, progressStart, progressEnd });
+        generate, blockBytes: constrained ? 2400 : 4800, onProgress, progressStart, progressEnd });
     },
     async detectMeetingBoundaries({ utterances, signal: requestSignal = signal }) {
       const instructions = locale === "en"

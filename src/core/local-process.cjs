@@ -33,23 +33,29 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs =
     const abort = () => { stoppedError = new CancelledError(); child.kill("SIGKILL"); };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
-    if (timeoutMs > 0) {
+    function armDeadline() {
+      clearTimeout(deadline);
+      if (timeoutMs <= 0 || settled || stoppedError) return;
       deadline = setTimeout(() => {
         if (settled || stoppedError) return;
         stoppedError = localError("LOCAL_ENGINE_TIMEOUT",
-          "Локальный движок слишком долго обрабатывает фрагмент. Закройте тяжёлые приложения и повторите обработку.",
-          "The local engine took too long to process a fragment. Close memory-intensive apps and retry.", locale);
+          "Локальный движок перестал сообщать о прогрессе. Повторите обработку. Готовые фрагменты расшифровки будут восстановлены, если они сохранились.",
+          "The local engine stopped reporting progress. Retry processing to reuse any saved transcription fragments.", locale);
         // Resolve only on close: a CPU retry must not overlap the old process.
         child.kill("SIGKILL");
       }, timeoutMs);
       deadline.unref?.();
     }
+    armDeadline();
     child.stdout.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > maxOutputBytes) {
         stoppedError = localError("LOCAL_OUTPUT_LIMIT", "Локальная модель вернула слишком большой ответ.", "Local model output exceeded its limit.", locale);
         child.kill("SIGKILL");
-      } else chunks.push(chunk);
+      } else {
+        chunks.push(chunk);
+        if (!onWhisperProgress && chunk.length) armDeadline();
+      }
     });
     // Engines may echo private source text. Only expose the recognizer's numeric
     // progress protocol, never arbitrary diagnostics or incomplete stderr lines.
@@ -57,13 +63,14 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs =
     child.stderr.on("data", chunk => {
       if (!onWhisperProgress || stoppedError || settled) return;
       pendingDiagnostic += chunk.toString("utf8");
-      const lines = pendingDiagnostic.split(/\r?\n/);
+      const lines = pendingDiagnostic.split(/[\r\n]+/);
       pendingDiagnostic = lines.pop().slice(-1024);
       for (const line of lines) {
         const match = /^whisper_print_progress_callback: progress =\s*(\d{1,3})%$/.exec(line);
         const percent = match ? Number(match[1]) : -1;
         if (percent > lastProgress && percent <= 100) {
           lastProgress = percent;
+          armDeadline();
           try { onWhisperProgress(percent); }
           catch (error) {
             stoppedError = error;
