@@ -97,7 +97,7 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
       if (schema) await fs.writeFile(schemaFile, JSON.stringify(schema), { mode: 0o600 });
       const settings = { schemaFile, model: path.join(modelDirectory, MODELS[1].file), promptFile, threads, useGpu, tokens, contextSize, batchSize };
       let output;
-      try { output = await runProcess(llama, buildLlamaArgs(settings), { signal: requestSignal, cwd: temporary, locale, timeoutMs: (useGpu ? 3 : 15) * MINUTE }); }
+      try { output = await runProcess(llama, buildLlamaArgs(settings), { signal: requestSignal, cwd: temporary, locale, extendTimeoutOnProgress: !useGpu, timeoutMs: (useGpu ? 3 : 15) * MINUTE }); }
       catch (error) {
         if (!canRetryOnCpu(error, requestSignal)) throw error;
         useGpu = false; // Do not retry a failing accelerator for every subsequent fragment.
@@ -120,7 +120,7 @@ async function createLocalEngine({ modelDirectory, binaryDirectory, locale = "ru
           "-l", "auto", "-t", String(threads), "-oj", "-of", prefix, "-np", "-pp"];
         // CPU works on both platforms; no dependency on CUDA, external Python, or a local server.
         if (!useGpu) args.push("-ng");
-        try { await runProcess(whisper, args, { signal: requestSignal, locale, onWhisperProgress: onProgress, timeoutMs: (useGpu ? 5 : 30) * MINUTE }); }
+        try { await runProcess(whisper, args, { signal: requestSignal, locale, onWhisperProgress: onProgress, extendTimeoutOnProgress: !useGpu, timeoutMs: (useGpu ? 5 : 30) * MINUTE }); }
         catch (error) {
           if (!canRetryOnCpu(error, requestSignal)) throw error;
           useGpu = false;

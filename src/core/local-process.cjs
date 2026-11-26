@@ -13,7 +13,7 @@ function engineEnvironment(source = process.env) {
   return result;
 }
 
-function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs = 30 * 60 * 1000, maxOutputBytes = 8 * 1024 * 1024, onWhisperProgress, spawnImpl = spawn } = {}) {
+function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs = 30 * 60 * 1000, extendTimeoutOnProgress = true, maxOutputBytes = 8 * 1024 * 1024, onWhisperProgress, spawnImpl = spawn } = {}) {
   if (signal?.aborted) return Promise.reject(new CancelledError());
   return new Promise((resolve, reject) => {
     const child = spawnImpl(binary, args, { cwd, windowsHide: true, shell: false,
@@ -54,7 +54,7 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs =
         child.kill("SIGKILL");
       } else {
         chunks.push(chunk);
-        if (!onWhisperProgress && chunk.length) armDeadline();
+        if (extendTimeoutOnProgress && !onWhisperProgress && chunk.length) armDeadline();
       }
     });
     // Engines may echo private source text. Only expose the recognizer's numeric
@@ -70,7 +70,7 @@ function runLocalProcess(binary, args, { signal, cwd, locale = "ru", timeoutMs =
         const percent = match ? Number(match[1]) : -1;
         if (percent > lastProgress && percent <= 100) {
           lastProgress = percent;
-          armDeadline();
+          if (extendTimeoutOnProgress) armDeadline();
           try { onWhisperProgress(percent); }
           catch (error) {
             stoppedError = error;

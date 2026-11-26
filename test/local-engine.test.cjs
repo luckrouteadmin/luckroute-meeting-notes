@@ -189,6 +189,7 @@ test("a timed-out Apple accelerator retries once on CPU and stays disabled for l
   const engine = await createLocalEngine({ modelDirectory: directory, binaryDirectory: directory,
     platform: "darwin", architecture: "arm64", locale: "en", verify: async () => {},
     runProcess: async (_binary, args, options) => {
+      assert.equal(options.extendTimeoutOnProgress === false, args[args.indexOf("-ngl") + 1] === "99");
       const prompt = args[args.indexOf("-f") + 1];
       await fs.access(prompt); // CPU retry must still have its input.
       attempts.push({ gpu: args[args.indexOf("-ngl") + 1], timeout: options.timeoutMs, context: Number(args[args.indexOf("-c") + 1]) });
