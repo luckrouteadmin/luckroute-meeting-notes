@@ -49,7 +49,7 @@ jobs:
       - name: Build and verify offline engines
         run: npm run build:local
       - name: Verify actual local summary inference
-        timeout-minutes: 25
+        timeout-minutes: ${{ runner.os == 'Windows' && 60 || 25 }}
         run: node scripts/test-native-summary.cjs
 
   dependency-review:

@@ -90,7 +90,7 @@ jobs:
       - name: Build bundled offline engines
         run: npm run build:local
       - name: Verify actual local summary inference
-        timeout-minutes: 25
+        timeout-minutes: 60
         run: node scripts/test-native-summary.cjs
       - name: Build EXE installer with retry
         shell: pwsh
