@@ -142,6 +142,7 @@ async function runMeetingWorkflow({
     apiKey = undefined;
     fetchImpl = undefined;
   }
+  const chunkSeconds = (mode === "local" && localEngine.chunkSeconds) || AUDIO_CHUNK_SECONDS;
   const normalizedLocale = normalizeLocale(locale);
   const normalizedVideoPaths = await validateInputs(
     videoPaths,
@@ -175,7 +176,7 @@ async function runMeetingWorkflow({
       checkpoint = await openCheckpointImpl({
         directory: checkpointDirectory,
         videoPaths: normalizedVideoPaths,
-        configuration: { mode, locale: normalizedLocale, model: mode === "local" ? "whisper-small-v1" : "gpt-4o-transcribe-diarize" }
+        configuration: { ...(chunkSeconds === AUDIO_CHUNK_SECONDS ? {} : { chunkSeconds }), mode, locale: normalizedLocale, model: mode === "local" ? "whisper-small-v1" : "gpt-4o-transcribe-diarize" }
       });
     } catch {
       checkpoint = createMemoryCheckpoint();
@@ -208,6 +209,7 @@ async function runMeetingWorkflow({
       const chunks = await splitAudioImpl({
         inputPath: source.sourcePath,
         outputDirectory: audioDirectory,
+        chunkSeconds,
         signal
       });
       chunkGroups.push({ ...source, chunks });
@@ -278,8 +280,8 @@ async function runMeetingWorkflow({
           sourceName: group.sourceName,
           sourcePath: group.sourcePath,
           chunkIndex,
-          sourceOffsetSeconds: chunkIndex * AUDIO_CHUNK_SECONDS,
-          offsetSeconds: chunkIndex * AUDIO_CHUNK_SECONDS
+          sourceOffsetSeconds: chunkIndex * chunkSeconds,
+          offsetSeconds: chunkIndex * chunkSeconds
         });
         completedChunks += 1;
       }

@@ -18,7 +18,7 @@ function resolveFfmpegPath() {
   return binary;
 }
 
-function buildFfmpegArgs(inputPath, outputPattern, format = "mp3") {
+function buildFfmpegArgs(inputPath, outputPattern, format = "mp3", chunkSeconds = AUDIO_CHUNK_SECONDS) {
   return [
     "-y",
     "-nostdin",
@@ -31,17 +31,17 @@ function buildFfmpegArgs(inputPath, outputPattern, format = "mp3") {
     "-ar", "16000",
     ...(format === "wav" ? ["-codec:a", "pcm_s16le"] : ["-codec:a", "libmp3lame", "-b:a", "48k"]),
     "-f", "segment",
-    "-segment_time", String(AUDIO_CHUNK_SECONDS),
+    "-segment_time", String(chunkSeconds),
     "-reset_timestamps", "1",
     outputPattern
   ];
 }
 
-async function splitAudio({ inputPath, outputDirectory, ffmpegPath = resolveFfmpegPath(), signal, format = "mp3" }) {
+async function splitAudio({ inputPath, outputDirectory, ffmpegPath = resolveFfmpegPath(), signal, format = "mp3", chunkSeconds = AUDIO_CHUNK_SECONDS }) {
   if (!["mp3", "wav"].includes(format)) throw new Error("Unsupported audio format");
   if (signal?.aborted) throw new CancelledError();
   const outputPattern = path.join(outputDirectory, `audio-%03d.${format}`);
-  const args = buildFfmpegArgs(inputPath, outputPattern, format);
+  const args = buildFfmpegArgs(inputPath, outputPattern, format, chunkSeconds);
 
   await new Promise((resolve, reject) => {
     const child = spawn(ffmpegPath, args, {
@@ -82,7 +82,7 @@ async function splitAudio({ inputPath, outputDirectory, ffmpegPath = resolveFfmp
   const entries = await fs.readdir(outputDirectory);
   const chunks = entries
     .filter((name) => new RegExp(`^audio-\\d{3,}\\.${format}$`).test(name))
-    .sort()
+    .sort((a, b) => a.localeCompare(b, "en", { numeric: true }))
     .map((name) => path.join(outputDirectory, name));
 
   if (chunks.length === 0) {

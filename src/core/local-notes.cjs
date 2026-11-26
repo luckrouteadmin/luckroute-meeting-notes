@@ -109,9 +109,9 @@ function contextRows(rows, core) {
 }
 
 async function summarizeLocalNotes({ transcript, summaryDetail = "standard", locale = "ru", signal,
-  generate, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
+  generate, blockBytes = 4800, onProgress = () => {}, progressStart = 76, progressEnd = 97 }) {
   const rows = transcriptRows(transcript);
-  const blocks = splitRows(rows);
+  const blocks = splitRows(rows, blockBytes);
   const notes = [];
   let currentPercent = progressStart;
   const instructions = noteInstructions(locale, summaryDetail);
@@ -131,7 +131,12 @@ async function summarizeLocalNotes({ transcript, summaryDetail = "standard", loc
             : "Аппаратное ускорение завершилось с ошибкой или превысило время ожидания. Повторяю эту часть на процессоре…" })
       });
     } catch (error) {
-      if (error.code !== "LOCAL_INVALID_NOTES") throw error;
+      if (error.code === "LOCAL_ENGINE_TIMEOUT" && retry && core.length > 1) {
+        checkCancelled();
+        onProgress({ stage: "local-summary", percent: currentPercent, message: locale === "en"
+          ? "The local engine stopped responding. Retrying this part in smaller pieces…"
+          : "Движок перестал отвечать. Повторяю обработку этой части более мелкими фрагментами…" });
+      } else if (error.code !== "LOCAL_INVALID_NOTES") throw error;
       if (!retry) throw invalid();
     }
     checkCancelled();
